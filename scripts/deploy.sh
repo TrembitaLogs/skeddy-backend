@@ -28,7 +28,7 @@ docker compose ${COMPOSE_FILES} run --rm app \
 
 # --- 5. Restart app service ---
 echo "==> Restarting app service..."
-docker compose ${COMPOSE_FILES} up -d app
+docker compose ${COMPOSE_FILES} up -d --force-recreate app
 
 # --- 6. Health check ---
 echo "==> Waiting for health check..."
