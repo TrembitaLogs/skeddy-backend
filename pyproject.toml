@@ -1,0 +1,97 @@
+[project]
+name = "skeddy-backend"
+version = "0.1.0"
+description = "Skeddy server - coordination backend for Skeddy Main and Skeddy Search apps"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosmtplib>=5.1.0",
+    "alembic>=1.18.3",
+    "asyncpg>=0.31.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.128.6",
+    "firebase-admin>=7.1.0",
+    "packaging>=26.0",
+    "bcrypt>=4.2.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyjwt[crypto]>=2.11.0",
+    "python-json-logger>=4.0.0",
+    "python-multipart>=0.0.22",
+    "redis>=7.1.1",
+    "sentry-sdk[fastapi]>=2.52.0",
+    "sqlalchemy[asyncio]>=2.0.46",
+    "tzdata>=2025.3",
+    "uvicorn[standard]>=0.40.0",
+    "slowapi>=0.1.9",
+    "sqladmin>=0.23.0",
+    "itsdangerous>=2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "factory-boy>=3.3.3",
+    "httpx>=0.28.1",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+
+# ── Ruff ──────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py313"
+line-length = 99
+exclude = ["migrations/versions/"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B008",   # function call in default argument (FastAPI Depends())
+    "B904",   # raise from inside except
+    "SIM108", # ternary operator
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ── Mypy ──────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+exclude = ["migrations/", "tests/"]
+check_untyped_defs = true
+warn_return_any = true
+no_implicit_optional = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "firebase_admin.*",
+    "slowapi.*",
+    "factory.*",
+]
+ignore_missing_imports = true
+
+# ── Coverage ──────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/__init__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@overload",
+    "raise NotImplementedError",
+]

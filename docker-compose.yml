@@ -1,0 +1,161 @@
+name: skeddy-backend
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: skeddy-db
+    environment:
+      POSTGRES_USER: skeddy
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: skeddy
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skeddy"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: skeddy-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    build: .
+    container_name: skeddy-app
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - frontend
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    container_name: skeddy-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/html:/var/www/html:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - app
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 $(cat /var/run/nginx.pid 2>/dev/null) 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+    networks:
+      - frontend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  certbot:
+    image: certbot/certbot
+    container_name: skeddy-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    environment:
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    restart: always
+    networks:
+      - frontend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backup:
+    image: postgres:16-alpine
+    container_name: skeddy-backup
+    volumes:
+      - ./scripts/backup-postgres.sh:/scripts/backup-postgres.sh:ro
+      - backupdata:/backups
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: skeddy
+      POSTGRES_USER: skeddy
+      PGPASSWORD: ${DB_PASSWORD}
+      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-backups}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >-
+      sh -c '
+      export -p > /etc/backup.env &&
+      echo "0 2 * * * . /etc/backup.env; sh /scripts/backup-postgres.sh >> /proc/1/fd/1 2>&1" > /etc/crontabs/root &&
+      crond -f -l 2
+      '
+    restart: always
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  backupdata:
