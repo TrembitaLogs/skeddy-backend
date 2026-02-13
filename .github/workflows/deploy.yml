@@ -70,8 +70,11 @@ jobs:
           script: |
             export IMAGE_TAG="${{ needs.build-and-push.outputs.image-tag }}"
             export REGISTRY="${{ env.REGISTRY }}"
-            export IMAGE_NAME="${{ env.IMAGE_NAME }}"
+            export IMAGE_NAME=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
             export CR_PAT="${{ secrets.GITHUB_TOKEN }}"
             export CR_USER="${{ github.actor }}"
             cd ~/skeddy-backend
+            git remote set-url origin "https://x-access-token:${CR_PAT}@github.com/${{ github.repository }}.git"
+            git fetch origin && git checkout -f origin/main -- docker-compose.yml docker-compose.prod.yml scripts/
+            git remote set-url origin "https://github.com/${{ github.repository }}.git"
             bash scripts/deploy.sh
