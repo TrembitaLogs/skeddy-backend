@@ -1,5 +1,7 @@
 """Admin panel setup module."""
 
+from fastapi import Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqladmin import Admin
 
 from app.admin.auth import AdminAuth
@@ -15,6 +17,8 @@ from app.admin.views import (
 )
 from app.config import settings
 from app.database import engine
+
+SWAGGER_UI_CDN = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5"
 
 
 def setup_admin(app):
@@ -44,5 +48,43 @@ def setup_admin(app):
     admin.add_view(RideAdmin)
     admin.add_view(AcceptFailureAdmin)
     admin.add_view(RefreshTokenAdmin)
+
+    # Protected API docs routes
+    @app.get("/admin/openapi.json", include_in_schema=False)
+    async def admin_openapi(request: Request):
+        if not request.session.get("admin_authenticated"):
+            return RedirectResponse(url="/admin/login", status_code=302)
+        return JSONResponse(content=app.openapi())
+
+    @app.get("/admin/docs", include_in_schema=False)
+    async def admin_docs(request: Request):
+        if not request.session.get("admin_authenticated"):
+            return RedirectResponse(url="/admin/login", status_code=302)
+        return HTMLResponse(
+            f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Skeddy API Docs</title>
+                <link rel="stylesheet" href="{SWAGGER_UI_CDN}/swagger-ui.css">
+            </head>
+            <body>
+                <div id="swagger-ui"></div>
+                <script src="{SWAGGER_UI_CDN}/swagger-ui-bundle.js"></script>
+                <script>
+                SwaggerUIBundle({{
+                    url: "/admin/openapi.json",
+                    dom_id: "#swagger-ui",
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIBundle.SwaggerUIStandalonePreset
+                    ],
+                    layout: "BaseLayout"
+                }});
+                </script>
+            </body>
+            </html>
+            """
+        )
 
     return admin

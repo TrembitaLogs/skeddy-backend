@@ -65,6 +65,9 @@ app = FastAPI(
     title="Skeddy API",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 register_exception_handlers(app)

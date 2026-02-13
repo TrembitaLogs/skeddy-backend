@@ -61,6 +61,18 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy deploy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "docker-compose.yml,docker-compose.prod.yml,scripts/deploy.sh"
+          target: ~/skeddy-backend
+          overwrite: true
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         with:
@@ -74,7 +86,4 @@ jobs:
             export CR_PAT="${{ secrets.GITHUB_TOKEN }}"
             export CR_USER="${{ github.actor }}"
             cd ~/skeddy-backend
-            git remote set-url origin "https://x-access-token:${CR_PAT}@github.com/${{ github.repository }}.git"
-            git fetch origin && git checkout -f origin/main -- docker-compose.yml docker-compose.prod.yml scripts/
-            git remote set-url origin "https://github.com/${{ github.repository }}.git"
             bash scripts/deploy.sh
