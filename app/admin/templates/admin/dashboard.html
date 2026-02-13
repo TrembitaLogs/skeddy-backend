@@ -1,0 +1,44 @@
+{% extends "sqladmin/layout.html" %}
+{% block content %}
+<div class="container-fluid">
+    <h2>Dashboard</h2>
+
+    <div class="row mt-4">
+        <div class="col-sm-6 col-xl-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title">Total Users</h5>
+                    <p class="card-text display-4">{{ users_count }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">Active Devices (30m)</h5>
+                    <p class="card-text display-4">{{ active_devices }} / {{ total_devices }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <h5 class="card-title">Active Searches</h5>
+                    <p class="card-text display-4">{{ active_searches }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <h5 class="card-title">Rides (24h / 7d)</h5>
+                    <p class="card-text display-4">{{ rides_24h }} / {{ rides_7d }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,193 @@
+import hashlib
+import json
+import logging
+import uuid
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
+import bcrypt
+import jwt
+from fastapi import HTTPException
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
+
+logger = logging.getLogger(__name__)
+
+_ROUNDS = 12
+
+# --- Password reset token Redis key schema ---
+# reset_token:{sha256_hash} → user_id (string), TTL: 1 hour
+# user_reset:{user_id}      → token_hash (string), TTL: 1 hour (old-token invalidation)
+_RESET_TOKEN_PREFIX = "reset_token:"
+_USER_RESET_PREFIX = "user_reset:"
+_RESET_TOKEN_TTL = 3600  # 1 hour
+
+
+def hash_password(password: str) -> str:
+    salt = bcrypt.gensalt(rounds=_ROUNDS)
+    return bcrypt.hashpw(password.encode(), salt).decode()
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+
+
+def create_access_token(user_id: UUID) -> str:
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(user_id),
+        "exp": now + timedelta(hours=settings.JWT_ACCESS_TOKEN_EXPIRE_HOURS),
+        "iat": now,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+def create_refresh_token() -> str:
+    return str(uuid.uuid4())
+
+
+def hash_refresh_token(token: str) -> str:
+    """Hash a refresh token using SHA256."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def save_refresh_token(
+    db: AsyncSession, user_id: UUID, token: str, expires_at: datetime
+) -> RefreshToken:
+    """Hash and save a refresh token to the database."""
+    token_hash = hash_refresh_token(token)
+    refresh_token = RefreshToken(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+    db.add(refresh_token)
+    await db.commit()
+    await db.refresh(refresh_token)
+    return refresh_token
+
+
+async def get_refresh_token_by_hash(db: AsyncSession, token_hash: str) -> RefreshToken | None:
+    """Find a refresh token record by its SHA256 hash."""
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    return result.scalar_one_or_none()
+
+
+async def delete_refresh_token(db: AsyncSession, token_hash: str) -> None:
+    """Delete a single refresh token by its hash."""
+    await db.execute(delete(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    await db.commit()
+
+
+async def delete_user_refresh_tokens(db: AsyncSession, user_id: UUID) -> int:
+    """Delete all refresh tokens for a user. Returns the number of deleted tokens."""
+    result = await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user_id))
+    await db.commit()
+    return result.rowcount  # type: ignore[no-any-return, attr-defined]
+
+
+async def store_reset_token(redis: Redis, user_id: UUID, token_hash: str) -> None:
+    """Store a password reset token hash in Redis with 1-hour TTL.
+
+    Invalidates any previous reset token for the same user before storing.
+    """
+    old_token_hash = await redis.get(f"{_USER_RESET_PREFIX}{user_id}")
+    if old_token_hash:
+        await redis.delete(f"{_RESET_TOKEN_PREFIX}{old_token_hash}")
+
+    await redis.setex(f"{_RESET_TOKEN_PREFIX}{token_hash}", _RESET_TOKEN_TTL, str(user_id))
+    await redis.setex(f"{_USER_RESET_PREFIX}{user_id}", _RESET_TOKEN_TTL, token_hash)
+
+
+async def verify_reset_token(redis: Redis, token_hash: str) -> UUID | None:
+    """Look up a reset token in Redis and return the associated user_id.
+
+    Returns None if the token does not exist or has expired.
+    """
+    user_id_str = await redis.get(f"{_RESET_TOKEN_PREFIX}{token_hash}")
+    if user_id_str is None:
+        return None
+    return UUID(user_id_str)
+
+
+async def delete_reset_token(redis: Redis, token_hash: str, user_id: UUID | None = None) -> None:
+    """Delete a reset token from Redis.
+
+    If user_id is provided, also removes the user tracking key.
+    """
+    await redis.delete(f"{_RESET_TOKEN_PREFIX}{token_hash}")
+    if user_id is not None:
+        await redis.delete(f"{_USER_RESET_PREFIX}{user_id}")
+
+
+async def get_user_by_phone(db: AsyncSession, phone_number: str) -> User | None:
+    """Find a user by phone number."""
+    result = await db.execute(select(User).where(User.phone_number == phone_number))
+    return result.scalar_one_or_none()
+
+
+async def refresh_tokens(db: AsyncSession, redis: Redis, old_refresh_token: str) -> dict:
+    """Refresh token pair with Redis grace period for concurrent requests.
+
+    If the same old token arrives again within 10s, returns the cached result
+    from Redis instead of failing with 401. When Redis is unavailable, grace
+    period is skipped (acceptable degradation).
+    """
+    old_hash = hash_refresh_token(old_refresh_token)
+    cache_key = f"refresh_grace:{old_hash}"
+
+    # Step 1: Check Redis grace cache first
+    try:
+        cached = await redis.get(cache_key)
+        if cached:
+            return dict(json.loads(cached))
+    except RedisError:
+        logger.warning("Redis unavailable during grace period check")
+
+    # Step 2: Validate token in DB
+    token_record = await get_refresh_token_by_hash(db, old_hash)
+    if not token_record:
+        raise HTTPException(status_code=401, detail="INVALID_REFRESH_TOKEN")
+    if token_record.expires_at < datetime.now(UTC):
+        await delete_refresh_token(db, old_hash)
+        raise HTTPException(status_code=401, detail="REFRESH_TOKEN_EXPIRED")
+
+    # Extract user_id before delete commits (avoids expired instance after commit)
+    user_id = token_record.user_id
+
+    # Step 3: Generate new token pair
+    new_access = create_access_token(user_id)
+    new_refresh = create_refresh_token()
+
+    # Step 4: Rotate tokens in DB
+    await delete_refresh_token(db, old_hash)
+    await save_refresh_token(
+        db,
+        user_id,
+        new_refresh,
+        datetime.now(UTC) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+
+    # Step 5: Cache response with 10s TTL for grace period
+    response = {
+        "user_id": str(user_id),
+        "access_token": new_access,
+        "refresh_token": new_refresh,
+    }
+    try:
+        await redis.setex(cache_key, 10, json.dumps(response))
+    except RedisError:
+        logger.warning("Redis unavailable during grace period cache write")
+
+    return response
