@@ -64,14 +64,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Copy deploy files to server
-        uses: appleboy/scp-action@v1.0.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "docker-compose.yml,docker-compose.prod.yml,scripts/deploy.sh"
-          target: ~/skeddy-backend
-          overwrite: true
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          rsync -avz --relative -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key" \
+            docker-compose.yml docker-compose.prod.yml scripts/deploy.sh \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/skeddy-backend/
+          rm -f ~/.ssh/deploy_key
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
