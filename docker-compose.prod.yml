@@ -4,9 +4,3 @@ services:
     image: ${APP_IMAGE:-ghcr.io/skeddy/backend:latest}
     ports:
       - "127.0.0.1:8000:8000"
-
-  nginx:
-    profiles: ["disabled"]
-
-  certbot:
-    profiles: ["disabled"]
