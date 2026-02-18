@@ -89,11 +89,13 @@ async def create_paired_device(
     device_id: str,
     token_hash: str,
     tz: str,
+    device_model: str | None = None,
 ) -> PairedDevice:
     """Create a new paired device record. Does NOT commit."""
     device = PairedDevice(
         user_id=user_id,
         device_id=device_id,
+        device_model=device_model,
         device_token_hash=token_hash,
         timezone=tz,
     )
@@ -113,6 +115,7 @@ async def confirm_pairing(
     timezone_str: str,
     redis: Redis,
     db: AsyncSession,
+    device_model: str | None = None,
 ) -> tuple[str, UUID]:
     """Confirm pairing: validate code, clean up old devices, create new pairing.
 
@@ -121,18 +124,24 @@ async def confirm_pairing(
 
     Raises:
         HTTPException(422): If timezone is invalid (INVALID_TIMEZONE).
-        HTTPException(400): If pairing code is invalid or expired.
+        HTTPException(404): If pairing code is invalid or expired (PAIRING_CODE_EXPIRED).
+        HTTPException(409): If pairing code was already used (PAIRING_CODE_USED).
         HTTPException(503): If Redis is unavailable.
     """
     # 1. Validate timezone (IANA format)
     validate_timezone(timezone_str)
 
-    # 2. Get user_id from Redis and delete code atomically
+    # 2. Get user_id from Redis, check used codes, delete code
     try:
         user_id_str = await redis.get(f"pairing_code:{code}")
         if not user_id_str:
-            raise HTTPException(status_code=400, detail="INVALID_OR_EXPIRED_CODE")
+            # Check if code was already used
+            if await redis.exists(f"used_pairing_code:{code}"):
+                raise HTTPException(status_code=409, detail="PAIRING_CODE_USED")
+            raise HTTPException(status_code=404, detail="PAIRING_CODE_EXPIRED")
         await redis.delete(f"pairing_code:{code}")
+        # Mark code as used (same TTL) to detect replay attempts
+        await redis.setex(f"used_pairing_code:{code}", PAIRING_CODE_TTL, "1")
     except RedisError as exc:
         logger.error("Redis unavailable during pairing confirmation: %s", exc)
         raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE") from exc
@@ -155,7 +164,7 @@ async def confirm_pairing(
     token_hash = hashlib.sha256(device_token.encode()).hexdigest()
 
     # 6. Create new paired device record
-    await create_paired_device(db, user_id, device_id, token_hash, timezone_str)
+    await create_paired_device(db, user_id, device_id, token_hash, timezone_str, device_model)
     await db.commit()
 
     return device_token, user_id

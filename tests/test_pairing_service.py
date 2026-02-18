@@ -211,6 +211,9 @@ def _make_fake_redis_with_code(code: str, user_id) -> AsyncMock:
     async def mock_get(key):
         return store.get(key)
 
+    async def mock_setex(key, ttl, value):
+        store[key] = value
+
     async def mock_delete(*keys):
         count = 0
         for key in keys:
@@ -219,9 +222,14 @@ def _make_fake_redis_with_code(code: str, user_id) -> AsyncMock:
                 count += 1
         return count
 
+    async def mock_exists(*keys):
+        return sum(1 for key in keys if key in store)
+
     redis = AsyncMock()
     redis.get = AsyncMock(side_effect=mock_get)
+    redis.setex = AsyncMock(side_effect=mock_setex)
     redis.delete = AsyncMock(side_effect=mock_delete)
+    redis.exists = AsyncMock(side_effect=mock_exists)
     redis._store = store
     return redis
 
@@ -274,35 +282,54 @@ async def test_confirm_pairing_valid_code_returns_device_token(db_session):
     assert returned_user_id == user.id
 
 
-# --- Test 2: invalid code → 400 INVALID_OR_EXPIRED_CODE ---
+# --- Test 2: invalid/expired code → 404 PAIRING_CODE_EXPIRED ---
 
 
-async def test_confirm_pairing_invalid_code_raises_400():
+async def test_confirm_pairing_invalid_code_raises_404():
     fake_redis = AsyncMock()
     fake_redis.get = AsyncMock(return_value=None)
+    fake_redis.exists = AsyncMock(return_value=0)
     db = AsyncMock()
 
     with pytest.raises(HTTPException) as exc_info:
         await confirm_pairing("000000", "dev-001", "America/New_York", fake_redis, db)
 
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "INVALID_OR_EXPIRED_CODE"
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "PAIRING_CODE_EXPIRED"
 
 
-# --- Test 3: expired code (TTL passed) → 400 INVALID_OR_EXPIRED_CODE ---
+# --- Test 3: expired code (TTL passed) → 404 PAIRING_CODE_EXPIRED ---
 
 
-async def test_confirm_pairing_expired_code_raises_400():
+async def test_confirm_pairing_expired_code_raises_404():
     """An expired code is gone from Redis — identical to invalid code."""
     fake_redis = AsyncMock()
     fake_redis.get = AsyncMock(return_value=None)
+    fake_redis.exists = AsyncMock(return_value=0)
     db = AsyncMock()
 
     with pytest.raises(HTTPException) as exc_info:
         await confirm_pairing("999999", "dev-001", "America/New_York", fake_redis, db)
 
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "INVALID_OR_EXPIRED_CODE"
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "PAIRING_CODE_EXPIRED"
+
+
+# --- Test 3b: already-used code → 409 PAIRING_CODE_USED ---
+
+
+async def test_confirm_pairing_used_code_raises_409():
+    """A code that was already consumed is tracked in Redis — returns 409."""
+    fake_redis = AsyncMock()
+    fake_redis.get = AsyncMock(return_value=None)
+    fake_redis.exists = AsyncMock(return_value=1)  # used_pairing_code:{code} exists
+    db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await confirm_pairing("111111", "dev-001", "America/New_York", fake_redis, db)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "PAIRING_CODE_USED"
 
 
 # --- Test 4: invalid timezone → 422 INVALID_TIMEZONE ---
@@ -404,6 +431,43 @@ async def test_confirm_pairing_stores_sha256_hash_of_token(db_session):
     device = result.scalar_one()
     assert device.device_token_hash == expected_hash
     assert device.device_token_hash != device_token  # not stored as plaintext
+
+
+# --- Test 9: device_model stored when provided ---
+
+
+async def test_confirm_pairing_stores_device_model(db_session):
+    user = await _create_user(db_session)
+    code = "111111"
+    fake_redis = _make_fake_redis_with_code(code, user.id)
+
+    await confirm_pairing(
+        code,
+        "model-test-dev",
+        "America/New_York",
+        fake_redis,
+        db_session,
+        device_model="Samsung SM-A156U",
+    )
+
+    result = await db_session.execute(select(PairedDevice).where(PairedDevice.user_id == user.id))
+    device = result.scalar_one()
+    assert device.device_model == "Samsung SM-A156U"
+
+
+# --- Test 10: device_model is None when not provided ---
+
+
+async def test_confirm_pairing_device_model_none_by_default(db_session):
+    user = await _create_user(db_session)
+    code = "222222"
+    fake_redis = _make_fake_redis_with_code(code, user.id)
+
+    await confirm_pairing(code, "no-model-dev", "America/New_York", fake_redis, db_session)
+
+    result = await db_session.execute(select(PairedDevice).where(PairedDevice.user_id == user.id))
+    device = result.scalar_one()
+    assert device.device_model is None
 
 
 # --- Test 8: Redis unavailable during confirm → 503 SERVICE_UNAVAILABLE ---
