@@ -6,10 +6,13 @@ from sqlalchemy import select
 
 from app.main import app
 from app.models.paired_device import PairedDevice
+from app.models.search_status import SearchStatus
 from app.redis import get_redis
 
 GENERATE_URL = "/api/v1/pairing/generate"
 CONFIRM_URL = "/api/v1/pairing/confirm"
+STATUS_URL = "/api/v1/pairing/status"
+UNPAIR_URL = "/api/v1/pairing"
 REGISTER_URL = "/api/v1/auth/register"
 
 _TEST_PASSWORD = "securePass1"
@@ -78,6 +81,7 @@ async def test_confirm_with_valid_code_returns_200_with_device_token(app_client)
         json={
             "code": code,
             "device_id": "android-dev-001",
+            "device_model": "Samsung SM-A156U",
             "timezone": "America/New_York",
         },
     )
@@ -89,11 +93,66 @@ async def test_confirm_with_valid_code_returns_200_with_device_token(app_client)
     assert data["user_id"] == user_id
 
 
-# --- Test 4: POST /pairing/confirm with invalid code → 400 ---
+# --- Test 3b: POST /pairing/confirm with device_model → stored in DB ---
 
 
-async def test_confirm_with_invalid_code_returns_400(app_client):
-    """POST /pairing/confirm with non-existent code → 400 INVALID_OR_EXPIRED_CODE."""
+async def test_confirm_stores_device_model_in_db(app_client, db_session):
+    """Confirm pairing with device_model → device_model persisted in paired_devices."""
+    token, user_id = await _register_and_get_token(app_client, "model@example.com")
+
+    gen = await app_client.post(GENERATE_URL, headers=_auth(token))
+    code = gen.json()["code"]
+
+    resp = await app_client.post(
+        CONFIRM_URL,
+        json={
+            "code": code,
+            "device_id": "model-dev-001",
+            "device_model": "Google Pixel 8 Pro",
+            "timezone": "America/New_York",
+        },
+    )
+    assert resp.status_code == 200
+
+    result = await db_session.execute(
+        select(PairedDevice).where(PairedDevice.user_id == UUID(user_id))
+    )
+    device = result.scalar_one()
+    assert device.device_model == "Google Pixel 8 Pro"
+
+
+# --- Test 3c: POST /pairing/confirm without device_model → None in DB ---
+
+
+async def test_confirm_without_device_model_stores_none(app_client, db_session):
+    """Confirm pairing without device_model → device_model is None."""
+    token, user_id = await _register_and_get_token(app_client, "nomodel@example.com")
+
+    gen = await app_client.post(GENERATE_URL, headers=_auth(token))
+    code = gen.json()["code"]
+
+    resp = await app_client.post(
+        CONFIRM_URL,
+        json={
+            "code": code,
+            "device_id": "nomodel-dev-001",
+            "timezone": "America/New_York",
+        },
+    )
+    assert resp.status_code == 200
+
+    result = await db_session.execute(
+        select(PairedDevice).where(PairedDevice.user_id == UUID(user_id))
+    )
+    device = result.scalar_one()
+    assert device.device_model is None
+
+
+# --- Test 4: POST /pairing/confirm with invalid code → 404 ---
+
+
+async def test_confirm_with_invalid_code_returns_404(app_client):
+    """POST /pairing/confirm with non-existent code → 404 PAIRING_CODE_EXPIRED."""
     response = await app_client.post(
         CONFIRM_URL,
         json={
@@ -103,8 +162,8 @@ async def test_confirm_with_invalid_code_returns_400(app_client):
         },
     )
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "INVALID_OR_EXPIRED_CODE"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "PAIRING_CODE_EXPIRED"
 
 
 # --- Test 5: POST /pairing/confirm with invalid timezone → 422 ---
@@ -132,11 +191,11 @@ async def test_confirm_with_invalid_timezone_returns_422(app_client):
     assert response.json()["error"]["code"] == "INVALID_TIMEZONE"
 
 
-# --- Test 6: POST /pairing/confirm with already-used code → 400 ---
+# --- Test 6: POST /pairing/confirm with already-used code → 409 ---
 
 
-async def test_confirm_with_used_code_returns_400(app_client):
-    """POST /pairing/confirm with code that was already consumed → 400."""
+async def test_confirm_with_used_code_returns_409(app_client):
+    """POST /pairing/confirm with code that was already consumed → 409 PAIRING_CODE_USED."""
     token, _ = await _register_and_get_token(app_client)
 
     # Generate and consume code
@@ -155,8 +214,8 @@ async def test_confirm_with_used_code_returns_400(app_client):
         json={"code": code, "device_id": "dev-002", "timezone": "America/New_York"},
     )
 
-    assert resp2.status_code == 400
-    assert resp2.json()["error"]["code"] == "INVALID_OR_EXPIRED_CODE"
+    assert resp2.status_code == 409
+    assert resp2.json()["error"]["code"] == "PAIRING_CODE_USED"
 
 
 # --- Test 7: Repeated POST /pairing/generate → new code, old code invalidated ---
@@ -191,7 +250,7 @@ async def test_repeated_generate_invalidates_old_code(app_client):
                 "timezone": "America/New_York",
             },
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
 
     # New code must be valid
     resp = await app_client.post(
@@ -273,3 +332,137 @@ async def test_confirm_redis_unavailable_returns_503(app_client):
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+
+# --- GET /pairing/status ---
+
+
+async def test_status_without_jwt_returns_401(app_client):
+    """GET /pairing/status without Authorization header → 401/403."""
+    response = await app_client.get(STATUS_URL)
+    assert response.status_code in (401, 403)
+
+
+async def test_status_not_paired_returns_false(app_client):
+    """GET /pairing/status when user has no paired device → paired=false."""
+    token, _ = await _register_and_get_token(app_client, "status-none@example.com")
+
+    response = await app_client.get(STATUS_URL, headers=_auth(token))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paired"] is False
+    assert data["device_id"] is None
+    assert data["device_model"] is None
+
+
+async def test_status_paired_returns_device_info(app_client):
+    """GET /pairing/status after pairing → paired=true with device_id and device_model."""
+    token, _ = await _register_and_get_token(app_client, "status-paired@example.com")
+
+    # Generate and confirm pairing
+    gen = await app_client.post(GENERATE_URL, headers=_auth(token))
+    code = gen.json()["code"]
+    await app_client.post(
+        CONFIRM_URL,
+        json={
+            "code": code,
+            "device_id": "status-dev-001",
+            "device_model": "Google Pixel 7",
+            "timezone": "America/New_York",
+        },
+    )
+
+    response = await app_client.get(STATUS_URL, headers=_auth(token))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paired"] is True
+    assert data["device_id"] == "status-dev-001"
+    assert data["device_model"] == "Google Pixel 7"
+
+
+async def test_status_paired_without_device_model(app_client):
+    """GET /pairing/status after pairing without device_model → device_model is null."""
+    token, _ = await _register_and_get_token(app_client, "status-nomodel@example.com")
+
+    gen = await app_client.post(GENERATE_URL, headers=_auth(token))
+    code = gen.json()["code"]
+    await app_client.post(
+        CONFIRM_URL,
+        json={
+            "code": code,
+            "device_id": "status-dev-002",
+            "timezone": "America/New_York",
+        },
+    )
+
+    response = await app_client.get(STATUS_URL, headers=_auth(token))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paired"] is True
+    assert data["device_id"] == "status-dev-002"
+    assert data["device_model"] is None
+
+
+# --- DELETE /pairing ---
+
+
+async def test_unpair_without_jwt_returns_401(app_client):
+    """DELETE /pairing without Authorization header → 401/403."""
+    response = await app_client.delete(UNPAIR_URL)
+    assert response.status_code in (401, 403)
+
+
+async def test_unpair_when_not_paired_returns_ok(app_client):
+    """DELETE /pairing when no device paired → 200 ok (idempotent)."""
+    token, _ = await _register_and_get_token(app_client, "unpair-none@example.com")
+
+    response = await app_client.delete(UNPAIR_URL, headers=_auth(token))
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+async def test_unpair_removes_device_and_deactivates_search(app_client, db_session):
+    """DELETE /pairing removes PairedDevice and sets SearchStatus.is_active=false."""
+    token, user_id = await _register_and_get_token(app_client, "unpair-full@example.com")
+
+    # Pair a device
+    gen = await app_client.post(GENERATE_URL, headers=_auth(token))
+    code = gen.json()["code"]
+    await app_client.post(
+        CONFIRM_URL,
+        json={
+            "code": code,
+            "device_id": "unpair-dev-001",
+            "timezone": "America/New_York",
+        },
+    )
+
+    # Start search so is_active=true
+    await app_client.post("/api/v1/search/start", headers=_auth(token))
+
+    # Unpair
+    response = await app_client.delete(UNPAIR_URL, headers=_auth(token))
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+    # Verify device deleted
+    result = await db_session.execute(
+        select(PairedDevice).where(PairedDevice.user_id == UUID(user_id))
+    )
+    assert result.scalar_one_or_none() is None
+
+    # Verify search deactivated
+    result = await db_session.execute(
+        select(SearchStatus).where(SearchStatus.user_id == UUID(user_id))
+    )
+    status = result.scalar_one_or_none()
+    assert status is not None
+    assert status.is_active is False
+
+    # Verify pairing status reflects unpaired
+    status_resp = await app_client.get(STATUS_URL, headers=_auth(token))
+    assert status_resp.json()["paired"] is False

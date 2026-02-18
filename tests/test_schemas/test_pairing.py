@@ -8,6 +8,7 @@ from app.schemas.pairing import (
     ConfirmPairingRequest,
     ConfirmPairingResponse,
     GeneratePairingResponse,
+    PairingStatusResponse,
 )
 
 
@@ -21,6 +22,20 @@ class TestConfirmPairingRequestValid:
         assert schema.code == "123456"
         assert schema.device_id == "android-id-1"
         assert schema.timezone == "America/New_York"
+        assert schema.device_model is None
+
+    def test_valid_with_device_model(self):
+        schema = ConfirmPairingRequest(
+            code="123456",
+            device_id="android-id-1",
+            timezone="America/New_York",
+            device_model="Samsung SM-A156U",
+        )
+        assert schema.device_model == "Samsung SM-A156U"
+
+    def test_device_model_optional(self):
+        schema = ConfirmPairingRequest(code="123456", device_id="dev1", timezone="UTC")
+        assert schema.device_model is None
 
     def test_code_boundary_low(self):
         schema = ConfirmPairingRequest(code="100000", device_id="dev1", timezone="UTC")
@@ -121,3 +136,27 @@ class TestConfirmPairingResponse:
         data = schema.model_dump(mode="json")
         assert isinstance(data["user_id"], str)
         assert data["user_id"] == str(uid)
+
+
+class TestPairingStatusResponse:
+    """PairingStatusResponse serialization."""
+
+    def test_paired_with_device_model(self):
+        schema = PairingStatusResponse(
+            paired=True, device_id="dev-001", device_model="Samsung Galaxy A14"
+        )
+        data = schema.model_dump(mode="json")
+        assert data["paired"] is True
+        assert data["device_id"] == "dev-001"
+        assert data["device_model"] == "Samsung Galaxy A14"
+
+    def test_paired_without_device_model(self):
+        schema = PairingStatusResponse(paired=True, device_id="dev-001")
+        assert schema.device_model is None
+
+    def test_not_paired(self):
+        schema = PairingStatusResponse(paired=False)
+        data = schema.model_dump(mode="json")
+        assert data["paired"] is False
+        assert data["device_id"] is None
+        assert data["device_model"] is None

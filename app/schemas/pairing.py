@@ -16,6 +16,7 @@ class ConfirmPairingRequest(BaseModel):
 
     code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
     device_id: str = Field(min_length=1)
+    device_model: str | None = Field(default=None, max_length=255)
     timezone: str = Field(min_length=1)
 
 
@@ -24,3 +25,11 @@ class ConfirmPairingResponse(BaseModel):
 
     device_token: str
     user_id: uuid.UUID
+
+
+class PairingStatusResponse(BaseModel):
+    """Response for GET /pairing/status — current pairing state."""
+
+    paired: bool
+    device_id: str | None = None
+    device_model: str | None = None
