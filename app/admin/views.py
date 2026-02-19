@@ -5,12 +5,28 @@ from typing import ClassVar
 from sqladmin import ModelView
 
 from app.models.accept_failure import AcceptFailure
+from app.models.app_config import AppConfig
 from app.models.paired_device import PairedDevice
 from app.models.refresh_token import RefreshToken
 from app.models.ride import Ride
 from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
 from app.models.user import User
+
+
+class AppConfigAdmin(ModelView, model=AppConfig):
+    """Admin view for AppConfig model (read-only + edit)."""
+
+    name = "App Config"
+    name_plural = "App Configs"
+    icon = "fa-solid fa-gear"
+
+    column_list: ClassVar = [AppConfig.key, AppConfig.value, AppConfig.updated_at]
+    column_sortable_list: ClassVar = [AppConfig.key, AppConfig.updated_at]
+
+    can_create = False
+    can_edit = True
+    can_delete = False
 
 
 class UserAdmin(ModelView, model=User):

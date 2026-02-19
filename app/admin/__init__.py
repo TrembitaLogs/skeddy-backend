@@ -10,6 +10,7 @@ from app.admin.auth import AdminAuth
 from app.admin.dashboard import DashboardView
 from app.admin.views import (
     AcceptFailureAdmin,
+    AppConfigAdmin,
     PairedDeviceAdmin,
     RefreshTokenAdmin,
     RideAdmin,
@@ -98,5 +99,6 @@ def setup_admin(app):
     admin.add_view(RideAdmin)
     admin.add_view(AcceptFailureAdmin)
     admin.add_view(RefreshTokenAdmin)
+    admin.add_view(AppConfigAdmin)
 
     return admin

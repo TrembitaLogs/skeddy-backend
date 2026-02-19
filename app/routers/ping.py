@@ -11,6 +11,7 @@ from app.middleware.rate_limiter import get_device_key, limiter
 from app.models.paired_device import PairedDevice
 from app.redis import get_redis
 from app.schemas.ping import PingFiltersResponse, PingRequest, PingResponse
+from app.services.config_service import get_min_search_version
 from app.services.filter_service import get_user_filters
 from app.services.ping_service import (
     check_app_version,
@@ -71,7 +72,8 @@ async def ping(
     filters_response = PingFiltersResponse(min_price=filters.min_price)
 
     # 4. Check app version.
-    version_ok = check_app_version(body.app_version, settings.MIN_SEARCH_APP_VERSION)
+    min_version = await get_min_search_version(db, redis)
+    version_ok = check_app_version(body.app_version, min_version)
     if not version_ok:
         device.last_interval_sent = INTERVAL_FORCE_UPDATE
         await db.commit()

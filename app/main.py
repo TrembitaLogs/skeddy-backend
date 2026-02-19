@@ -8,6 +8,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.admin import setup_admin
 from app.config import settings
@@ -17,6 +18,7 @@ from app.middleware.logging import setup_logging
 from app.middleware.rate_limiter import setup_rate_limiter
 from app.middleware.request_id import RequestIdMiddleware
 from app.redis import redis_client
+from app.routers.admin_config import router as admin_config_router
 from app.routers.auth import router as auth_router
 from app.routers.fcm import router as fcm_router
 from app.routers.filters import router as filters_router
@@ -82,9 +84,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SessionMiddleware, secret_key=settings.ADMIN_SECRET_KEY)
 app.add_middleware(RequestIdMiddleware)
 
 setup_rate_limiter(app)
+
+# Admin config API (uses admin session auth, placed after setup_admin)
+app.include_router(admin_config_router)
 
 
 @app.get("/health")
