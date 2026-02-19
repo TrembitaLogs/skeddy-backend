@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -8,12 +9,14 @@ from app.dependencies.device_auth import verify_device
 from app.middleware.rate_limiter import get_device_key, get_user_key, limiter
 from app.models.paired_device import PairedDevice
 from app.models.user import User
+from app.redis import get_redis
 from app.schemas.auth import OkResponse
 from app.schemas.search import (
     DeviceOverrideRequest,
     SearchStatusResponse,
     calculate_is_online,
 )
+from app.services.config_service import get_min_search_version
 from app.services.pairing_service import get_device_by_user_id
 from app.services.ping_service import check_app_version
 from app.services.search_service import get_search_status, set_search_active
@@ -57,6 +60,7 @@ async def get_status(
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Return search status with device online information."""
     status = await get_search_status(db, current_user.id)
@@ -70,9 +74,8 @@ async def get_status(
         is_online = calculate_is_online(device.last_ping_at, interval)
         last_ping_at = device.last_ping_at
         if device.app_version is not None:
-            force_update = not check_app_version(
-                device.app_version, settings.MIN_SEARCH_APP_VERSION
-            )
+            min_version = await get_min_search_version(db, redis)
+            force_update = not check_app_version(device.app_version, min_version)
 
     return SearchStatusResponse(
         is_active=status.is_active,
