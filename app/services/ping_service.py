@@ -206,6 +206,7 @@ async def update_device_state(
     Updates:
     - last_ping_at: current UTC timestamp
     - timezone: from request (validated IANA identifier)
+    - app_version: from request
     - accessibility_enabled, lyft_running, screen_on: from device_health (if provided)
     - last_interval_sent: the interval sent in response (if provided)
     - offline_notified: reset to False (device is online)
@@ -218,6 +219,7 @@ async def update_device_state(
     """
     device.last_ping_at = datetime.now(UTC)
     device.timezone = request.timezone
+    device.app_version = request.app_version
 
     # Update health fields only if device_health is provided
     if request.device_health is not None:

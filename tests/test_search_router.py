@@ -343,3 +343,73 @@ async def test_device_override_idempotent(app_client):
 
     assert resp1.status_code == 200
     assert resp2.status_code == 200
+
+
+# ===== GET /search/status force_update (Task 9.1) =====
+
+
+async def test_status_force_update_false_without_device(app_client):
+    """GET /search/status with no paired device -> force_update=False."""
+    reg = await _register_and_get_tokens(app_client, email="fu_nodev@example.com")
+
+    response = await app_client.get(
+        SEARCH_STATUS_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["force_update"] is False
+
+
+async def test_status_force_update_false_when_version_ok(app_client, db_session):
+    """GET /search/status with current app_version -> force_update=False."""
+    reg = await _register_and_get_tokens(app_client, email="fu_ok@example.com")
+    await _pair_device(app_client, reg["access_token"], device_id="fu-ok-dev")
+
+    user_id = UUID(reg["user_id"])
+    result = await db_session.execute(select(PairedDevice).where(PairedDevice.user_id == user_id))
+    device = result.scalar_one()
+    device.app_version = "1.0.0"
+    await db_session.commit()
+
+    response = await app_client.get(
+        SEARCH_STATUS_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["force_update"] is False
+
+
+async def test_status_force_update_true_when_outdated(app_client, db_session):
+    """GET /search/status with outdated app_version -> force_update=True."""
+    reg = await _register_and_get_tokens(app_client, email="fu_old@example.com")
+    await _pair_device(app_client, reg["access_token"], device_id="fu-old-dev")
+
+    user_id = UUID(reg["user_id"])
+    result = await db_session.execute(select(PairedDevice).where(PairedDevice.user_id == user_id))
+    device = result.scalar_one()
+    device.app_version = "0.9.0"
+    await db_session.commit()
+
+    response = await app_client.get(
+        SEARCH_STATUS_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["force_update"] is True
+
+
+async def test_status_force_update_false_when_no_version(app_client, db_session):
+    """GET /search/status with app_version=None (never pinged) -> force_update=False."""
+    reg = await _register_and_get_tokens(app_client, email="fu_none@example.com")
+    await _pair_device(app_client, reg["access_token"], device_id="fu-none-dev")
+
+    response = await app_client.get(
+        SEARCH_STATUS_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["force_update"] is False

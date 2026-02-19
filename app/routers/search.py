@@ -15,6 +15,7 @@ from app.schemas.search import (
     calculate_is_online,
 )
 from app.services.pairing_service import get_device_by_user_id
+from app.services.ping_service import check_app_version
 from app.services.search_service import get_search_status, set_search_active
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -63,15 +64,21 @@ async def get_status(
 
     is_online = False
     last_ping_at = None
+    force_update = False
     if device is not None:
         interval = device.last_interval_sent or settings.DEFAULT_SEARCH_INTERVAL_SECONDS
         is_online = calculate_is_online(device.last_ping_at, interval)
         last_ping_at = device.last_ping_at
+        if device.app_version is not None:
+            force_update = not check_app_version(
+                device.app_version, settings.MIN_SEARCH_APP_VERSION
+            )
 
     return SearchStatusResponse(
         is_active=status.is_active,
         is_online=is_online,
         last_ping_at=last_ping_at,
+        force_update=force_update,
     )
 
 

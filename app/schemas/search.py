@@ -22,6 +22,7 @@ class SearchStatusResponse(BaseModel):
     is_active: bool
     is_online: bool
     last_ping_at: datetime | None
+    force_update: bool = False
 
 
 class DeviceOverrideRequest(BaseModel):
