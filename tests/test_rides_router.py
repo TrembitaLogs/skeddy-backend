@@ -511,6 +511,44 @@ async def test_get_ride_events_invalid_jwt_returns_401(app_client):
 # ---------------------------------------------------------------------------
 
 
+async def test_get_ride_events_with_since_filters_old_events(app_client, db_session):
+    """GET /rides/events?since=... -> only returns events after the cutoff."""
+    from datetime import datetime, timedelta
+
+    reg = await _register(app_client, email="since@example.com")
+    user_id = UUID(reg["user_id"])
+
+    base_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    for i in range(3):
+        ride = Ride(
+            user_id=user_id,
+            idempotency_key=str(uuid4()),
+            event_type="ACCEPTED",
+            ride_data={
+                "price": 10.0 + i,
+                "pickup_time": f"Trip {i}",
+                "pickup_location": f"Start {i}",
+                "dropoff_location": f"End {i}",
+            },
+            created_at=base_time + timedelta(weeks=i * 4),
+        )
+        db_session.add(ride)
+    await db_session.flush()
+
+    # Filter: only events from 3 weeks after base (should exclude first ride)
+    since = (base_time + timedelta(weeks=3)).isoformat()
+    resp = await app_client.get(
+        RIDES_EVENTS_URL,
+        params={"since": since},
+        headers=_jwt(reg["access_token"]),
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert len(data["events"]) == 2
+
+
 async def test_get_ride_events_no_rides_returns_empty(app_client, db_session):
     """GET /rides/events for user with no rides -> empty events, total=0."""
     reg = await _register(app_client, email="events5@example.com")

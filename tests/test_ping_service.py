@@ -16,6 +16,8 @@ from app.schemas.ping import AcceptFailureItem, DeviceHealth, PingRequest, PingS
 from app.services.ping_service import (
     BATCH_DEDUP_TTL,
     BATCH_KEY_PREFIX,
+    MIN_INTERVAL_SECONDS,
+    calculate_dynamic_interval,
     check_app_version,
     is_batch_already_processed,
     is_within_schedule,
@@ -1034,3 +1036,98 @@ async def test_save_accept_failures_integration_records_in_db(db_session):
     assert records[1].pickup_time is None
     assert records[1].reported_at == ts2
     assert records[1].user_id == user.id
+
+
+# === calculate_dynamic_interval tests ===
+
+# Standard hourly weights used across tests (sum = 100)
+_WEIGHTS = [
+    5.23,
+    5.19,
+    4.97,
+    4.28,
+    3.07,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    3.69,
+    5.10,
+    6.24,
+    4.96,
+    5.06,
+    5.18,
+    4.59,
+    4.57,
+    5.91,
+    5.58,
+    5.98,
+    5.29,
+    5.15,
+    4.96,
+]
+
+
+# --- Test 1: peak hour 12 (weight 6.24), cycle 15s -> interval ~15s ---
+
+
+def test_dynamic_interval_peak_hour():
+    result = calculate_dynamic_interval(1920, _WEIGHTS, 12, 15000)
+    # 6.24% of 1920 = 119.808 rph -> 30.05s total -> 30.05 - 15 = 15.05 -> int = 15
+    assert result == 15
+
+
+# --- Test 2: off-peak hour 5 (weight 1.0), cycle 15s -> interval ~172s ---
+
+
+def test_dynamic_interval_off_peak_hour():
+    result = calculate_dynamic_interval(1920, _WEIGHTS, 5, 15000)
+    # 1.0% of 1920 = 19.2 rph -> 187.5s total -> 187.5 - 15 = 172.5 -> int = 172
+    assert result == 172
+
+
+# --- Test 3: minimum clamp — large cycle_duration -> returns MIN_INTERVAL_SECONDS ---
+
+
+def test_dynamic_interval_minimum_clamp():
+    result = calculate_dynamic_interval(1920, _WEIGHTS, 12, 40000)
+    # 30.05 - 40 = -9.95 -> clamped to MIN_INTERVAL_SECONDS
+    assert result == MIN_INTERVAL_SECONDS
+
+
+# --- Test 4: None cycle_duration -> uses default 15000ms ---
+
+
+def test_dynamic_interval_none_cycle_duration():
+    result = calculate_dynamic_interval(1920, _WEIGHTS, 12, None)
+    # Same as test 1: uses DEFAULT_CYCLE_DURATION_MS = 15000
+    assert result == 15
+
+
+# --- Test 5: edge hour 0 (weight 5.23) ---
+
+
+def test_dynamic_interval_hour_zero():
+    result = calculate_dynamic_interval(1920, _WEIGHTS, 0, 15000)
+    # 5.23% of 1920 = 100.416 rph -> 35.85s total -> 35.85 - 15 = 20.85 -> int = 20
+    assert result == 20
+
+
+# --- Test 6: edge hour 23 (weight 4.96) ---
+
+
+def test_dynamic_interval_hour_23():
+    result = calculate_dynamic_interval(1920, _WEIGHTS, 23, 15000)
+    # 4.96% of 1920 = 95.232 rph -> 37.80s total -> 37.80 - 15 = 22.80 -> int = 22
+    assert result == 22
+
+
+# --- Test 7: different requests_per_day scales interval ---
+
+
+def test_dynamic_interval_different_rpd():
+    # Double the budget -> half the total_cycle_time -> shorter interval
+    result = calculate_dynamic_interval(3840, _WEIGHTS, 12, 15000)
+    # 6.24% of 3840 = 239.616 rph -> 15.02s total -> 15.02 - 15 = 0.02 -> clamped to 5
+    assert result == MIN_INTERVAL_SECONDS

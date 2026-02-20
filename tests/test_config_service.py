@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock
 
 from redis.exceptions import RedisError
@@ -5,7 +6,13 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.app_config import AppConfig
-from app.services.config_service import CACHE_KEY, get_min_search_version, set_min_search_version
+from app.services.config_service import (
+    CACHE_KEY,
+    CACHE_KEY_INTERVAL,
+    get_min_search_version,
+    get_search_interval_config,
+    set_min_search_version,
+)
 
 # ---------------------------------------------------------------------------
 # Test 1: Redis has cached value -> returns cached, no DB query
@@ -112,3 +119,127 @@ async def test_set_upserts_value(db_session, fake_redis):
         select(AppConfig.value).where(AppConfig.key == "min_search_app_version")
     )
     assert result.scalar_one() == "2.0.0"
+
+
+# ===========================================================================
+# get_search_interval_config tests
+# ===========================================================================
+
+_WEIGHTS = [
+    5.23,
+    5.19,
+    4.97,
+    4.28,
+    3.07,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    3.69,
+    5.10,
+    6.24,
+    4.96,
+    5.06,
+    5.18,
+    4.59,
+    4.57,
+    5.91,
+    5.58,
+    5.98,
+    5.29,
+    5.15,
+    4.96,
+]
+
+
+async def _seed_interval_configs(db_session, rpd=1920, rph=None):
+    """Seed requests_per_day and requests_per_hour in DB."""
+    if rph is None:
+        rph = _WEIGHTS
+    db_session.add(AppConfig(key="requests_per_day", value=str(rpd)))
+    db_session.add(AppConfig(key="requests_per_hour", value=json.dumps(rph)))
+    await db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Redis has cached interval config -> returns parsed tuple
+# ---------------------------------------------------------------------------
+
+
+async def test_interval_config_returns_cached(db_session, fake_redis):
+    """get_search_interval_config returns cached value from Redis."""
+    cache_blob = json.dumps({"rpd": 1920, "rph": _WEIGHTS})
+    fake_redis._store[CACHE_KEY_INTERVAL] = cache_blob
+
+    result = await get_search_interval_config(db_session, fake_redis)
+
+    assert result is not None
+    rpd, rph = result
+    assert rpd == 1920
+    assert rph == _WEIGHTS
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Redis miss -> reads DB -> caches and returns
+# ---------------------------------------------------------------------------
+
+
+async def test_interval_config_falls_back_to_db(db_session, fake_redis):
+    """get_search_interval_config falls back to DB and caches result."""
+    await _seed_interval_configs(db_session)
+
+    result = await get_search_interval_config(db_session, fake_redis)
+
+    assert result is not None
+    rpd, rph = result
+    assert rpd == 1920
+    assert rph == _WEIGHTS
+    # Verify cached in Redis
+    assert CACHE_KEY_INTERVAL in fake_redis._store
+
+
+# ---------------------------------------------------------------------------
+# Test 9: No DB rows -> returns None
+# ---------------------------------------------------------------------------
+
+
+async def test_interval_config_returns_none_when_missing(db_session, fake_redis):
+    """get_search_interval_config returns None when no config rows exist."""
+    result = await get_search_interval_config(db_session, fake_redis)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Only one key present -> returns None
+# ---------------------------------------------------------------------------
+
+
+async def test_interval_config_returns_none_when_partial(db_session, fake_redis):
+    """get_search_interval_config returns None when only one config key exists."""
+    db_session.add(AppConfig(key="requests_per_day", value="1920"))
+    await db_session.commit()
+
+    result = await get_search_interval_config(db_session, fake_redis)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Redis error -> graceful fallback to DB
+# ---------------------------------------------------------------------------
+
+
+async def test_interval_config_graceful_redis_failure(db_session):
+    """get_search_interval_config falls back to DB when Redis raises RedisError."""
+    await _seed_interval_configs(db_session)
+
+    broken_redis = AsyncMock()
+    broken_redis.get = AsyncMock(side_effect=RedisError("connection refused"))
+    broken_redis.setex = AsyncMock(side_effect=RedisError("connection refused"))
+
+    result = await get_search_interval_config(db_session, broken_redis)
+
+    assert result is not None
+    rpd, rph = result
+    assert rpd == 1920
+    assert rph == _WEIGHTS

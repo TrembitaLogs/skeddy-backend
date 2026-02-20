@@ -24,7 +24,7 @@ class AppConfigAdmin(ModelView, model=AppConfig):
     column_list: ClassVar = [AppConfig.key, AppConfig.value, AppConfig.updated_at]
     column_sortable_list: ClassVar = [AppConfig.key, AppConfig.updated_at]
 
-    can_create = False
+    can_create = True
     can_edit = True
     can_delete = False
 

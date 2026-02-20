@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 BATCH_DEDUP_TTL = 3600  # 1 hour TTL for batch deduplication
 BATCH_KEY_PREFIX = "stats_batch:"
+DEFAULT_CYCLE_DURATION_MS = 15000  # Default search cycle duration when not reported
+MIN_INTERVAL_SECONDS = 5  # Minimum interval between search cycles
 
 
 def validate_timezone(timezone_str: str) -> ZoneInfo:
@@ -55,6 +57,32 @@ def check_app_version(app_version: str, min_version: str) -> bool:
         return Version(app_version) >= Version(min_version)
     except (InvalidVersion, TypeError):
         return False
+
+
+def calculate_dynamic_interval(
+    requests_per_day: int,
+    requests_per_hour: list[float],
+    local_hour: int,
+    cycle_duration_ms: int | None = None,
+) -> int:
+    """Calculate search interval based on hourly weight distribution.
+
+    Args:
+        requests_per_day: Total daily request budget (e.g., 1920).
+        requests_per_hour: List of 24 percentage weights (must sum to ~100).
+        local_hour: Current hour (0-23) in device local timezone.
+        cycle_duration_ms: Last search cycle duration in milliseconds.
+            Falls back to DEFAULT_CYCLE_DURATION_MS if None.
+
+    Returns:
+        Interval in seconds (integer), minimum MIN_INTERVAL_SECONDS.
+    """
+    weight = requests_per_hour[local_hour]
+    requests_this_hour = weight / 100 * requests_per_day
+    total_cycle_time = 3600 / requests_this_hour
+    cycle_duration_s = (cycle_duration_ms or DEFAULT_CYCLE_DURATION_MS) / 1000
+    interval = total_cycle_time - cycle_duration_s
+    return max(int(interval), MIN_INTERVAL_SECONDS)
 
 
 def parse_time(time_str: str) -> time:

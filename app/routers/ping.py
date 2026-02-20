@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
 from redis.asyncio import Redis
@@ -11,9 +13,10 @@ from app.middleware.rate_limiter import get_device_key, limiter
 from app.models.paired_device import PairedDevice
 from app.redis import get_redis
 from app.schemas.ping import PingFiltersResponse, PingRequest, PingResponse
-from app.services.config_service import get_min_search_version
+from app.services.config_service import get_min_search_version, get_search_interval_config
 from app.services.filter_service import get_user_filters
 from app.services.ping_service import (
+    calculate_dynamic_interval,
     check_app_version,
     is_within_schedule,
     process_stats_if_new,
@@ -90,7 +93,19 @@ async def ping(
     search_active = search_status.is_active and is_within_schedule(filters, body.timezone)
 
     # 6. Calculate interval, save to device, return response.
-    interval = settings.DEFAULT_SEARCH_INTERVAL_SECONDS if search_active else INTERVAL_INACTIVE
+    if not search_active:
+        interval = INTERVAL_INACTIVE
+    else:
+        interval_config = await get_search_interval_config(db, redis)
+        if interval_config is not None:
+            rpd, rph = interval_config
+            tz = ZoneInfo(body.timezone)
+            local_hour = datetime.now(tz).hour
+            interval = calculate_dynamic_interval(
+                rpd, rph, local_hour, body.last_cycle_duration_ms
+            )
+        else:
+            interval = settings.DEFAULT_SEARCH_INTERVAL_SECONDS
     device.last_interval_sent = interval
     await db.commit()
 

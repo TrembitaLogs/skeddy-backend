@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.exc import IntegrityError
@@ -103,6 +104,7 @@ async def get_ride_events(
     response: Response,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    since: datetime | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -110,8 +112,9 @@ async def get_ride_events(
 
     Returns events ordered by created_at descending (newest first).
     Uses offset-based pagination with total count.
+    Optionally filters by created_at >= since (ISO 8601 datetime).
     """
-    events, total = await get_user_ride_events(db, current_user.id, limit, offset)
+    events, total = await get_user_ride_events(db, current_user.id, limit, offset, since=since)
 
     return RideEventsListResponse(
         events=[
