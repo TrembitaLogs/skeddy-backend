@@ -1,6 +1,4 @@
-import hashlib
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -31,22 +29,27 @@ from app.schemas.auth import (
     RequestResetRequest,
     ResetPasswordRequest,
     UpdatePhoneRequest,
+    VerifyEmailRequest,
 )
 from app.services.auth_service import (
     create_access_token,
     create_refresh_token,
-    delete_reset_token,
+    delete_reset_code,
     delete_user_refresh_tokens,
+    delete_verify_code,
     get_user_by_phone,
     hash_password,
     hash_refresh_token,
     refresh_tokens,
     save_refresh_token,
-    store_reset_token,
+    store_reset_code,
+    store_verify_code,
     verify_password,
-    verify_reset_token,
+    verify_reset_code,
+    verify_verify_code,
 )
-from app.services.email_service import send_reset_email
+from app.services.email_service import send_password_reset_code, send_verification_code
+from app.utils.codes import generate_six_digit_code
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,11 @@ _DUMMY_HASH = hash_password("timing-safe-dummy")
 @router.post("/register", response_model=AuthResponse, status_code=201)
 @limiter.limit("10/minute")
 async def register(
-    request: Request, response: Response, body: RegisterRequest, db: AsyncSession = Depends(get_db)
+    request: Request,
+    response: Response,
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     # Check email uniqueness
     result = await db.execute(select(User).where(User.email == body.email))
@@ -94,6 +101,14 @@ async def register(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
+
+    # Send verification email (failure must not break registration)
+    code = generate_six_digit_code()
+    try:
+        await store_verify_code(redis, str(user.id), code)
+        await send_verification_code(body.email, code)
+    except Exception:
+        logger.warning("Failed to send verification email for user %s", user.id)
 
     return AuthResponse(user_id=user.id, access_token=access_token, refresh_token=refresh_token)
 
@@ -146,9 +161,77 @@ async def get_profile(
     return ProfileResponse(
         user_id=current_user.id,
         email=current_user.email,
+        email_verified=current_user.email_verified,
         phone_number=current_user.phone_number,
         created_at=current_user.created_at,
     )
+
+
+@router.post("/verify-email", response_model=OkResponse)
+@limiter.limit("10/minute", key_func=get_user_key)
+async def verify_email(
+    request: Request,
+    response: Response,
+    body: VerifyEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    # Check if already verified
+    if current_user.email_verified:
+        raise HTTPException(status_code=400, detail="ALREADY_VERIFIED")
+
+    # Verify Redis availability
+    try:
+        await redis.ping()  # type: ignore[misc]
+    except RedisError:
+        logger.error("Redis unavailable for email verification")
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+
+    # Verify code (raises 401 on failure)
+    await verify_verify_code(redis, str(current_user.id), body.code)
+
+    # Mark email as verified
+    current_user.email_verified = True
+    await db.commit()
+
+    # Delete used code from Redis
+    await delete_verify_code(redis, str(current_user.id))
+
+    logger.info("Email verified for user %s", current_user.id)
+    return OkResponse()
+
+
+@router.post("/resend-verification", response_model=OkResponse)
+@limiter.limit("3/hour", key_func=get_user_key)
+async def resend_verification(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+):
+    # Check if already verified
+    if current_user.email_verified:
+        raise HTTPException(status_code=400, detail="ALREADY_VERIFIED")
+
+    # Verify Redis availability
+    try:
+        await redis.ping()  # type: ignore[misc]
+    except RedisError:
+        logger.error("Redis unavailable for resend verification")
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+
+    # Generate new verification code (overwrites previous in Redis)
+    code = generate_six_digit_code()
+    await store_verify_code(redis, str(current_user.id), code)
+
+    # Send verification email (failure must not break the endpoint)
+    try:
+        await send_verification_code(current_user.email, code)
+    except Exception:
+        logger.warning("Failed to send verification email for user %s", current_user.id)
+
+    return OkResponse()
 
 
 @router.post("/change-password", response_model=OkResponse)
@@ -242,14 +325,11 @@ async def request_reset(
     user = result.scalar_one_or_none()
 
     if user:
-        # Generate reset token and its SHA256 hash
-        reset_token = str(uuid.uuid4())
-        token_hash = hashlib.sha256(reset_token.encode()).hexdigest()
-
-        await store_reset_token(redis, user.id, token_hash)
+        code = generate_six_digit_code()
+        await store_reset_code(redis, body.email, code)
 
         try:
-            await send_reset_email(body.email, reset_token)
+            await send_password_reset_code(body.email, code)
         except Exception:
             logger.warning("Failed to send reset email for password reset request")
 
@@ -268,33 +348,31 @@ async def reset_password(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    # Verify Redis availability - reset tokens are stored in Redis
+    # Verify Redis availability - reset codes are stored in Redis
     try:
         await redis.ping()  # type: ignore[misc]
     except RedisError:
         logger.error("Redis unavailable for password reset")
         raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
-    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    # Verify reset code (raises 401 on failure)
+    await verify_reset_code(redis, body.email, body.code)
 
-    # Verify token exists in Redis and get associated user_id
-    user_id = await verify_reset_token(redis, token_hash)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="INVALID_RESET_TOKEN")
-
-    # Delete reset token from Redis (one-time use)
-    await delete_reset_token(redis, token_hash, user_id)
-
-    # Update user password
-    result = await db.execute(select(User).where(User.id == user_id))
+    # Find user by email
+    result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if user is None:
-        raise HTTPException(status_code=401, detail="INVALID_RESET_TOKEN")
+        # Code was valid but user doesn't exist (edge case: deleted between request-reset and reset)
+        await delete_reset_code(redis, body.email)
+        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
 
     user.password_hash = hash_password(body.new_password)
 
     # Invalidate all refresh tokens (force re-login on all devices)
-    await delete_user_refresh_tokens(db, user_id)
+    await delete_user_refresh_tokens(db, user.id)
 
-    logger.info("Password reset completed for user %s", user_id)
+    # Delete used reset code from Redis
+    await delete_reset_code(redis, body.email)
+
+    logger.info("Password reset completed for user %s", user.id)
     return OkResponse()

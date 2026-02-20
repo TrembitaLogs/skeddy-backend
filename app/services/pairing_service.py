@@ -1,6 +1,5 @@
 import hashlib
 import logging
-import random
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -13,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.accept_failure import AcceptFailure
 from app.models.paired_device import PairedDevice
 from app.services.ping_service import validate_timezone
+from app.utils.codes import generate_six_digit_code
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,7 @@ async def generate_pairing_code(redis: Redis, user_id: UUID) -> tuple[str, datet
         if old_code:
             await redis.delete(f"pairing_code:{old_code}")
 
-        # Generate 6-digit code (100000-999999)
-        code = str(random.randint(100000, 999999))
+        code = generate_six_digit_code()
 
         # Store code → user_id mapping
         await redis.setex(f"pairing_code:{code}", PAIRING_CODE_TTL, str(user_id))

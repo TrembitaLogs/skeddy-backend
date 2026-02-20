@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from app.models.accept_failure import AcceptFailure
 from app.models.paired_device import PairedDevice
 from app.models.search_filters import SearchFilters
+from app.models.user import User
 
 PING_URL = "/api/v1/ping"
 REGISTER_URL = "/api/v1/auth/register"
@@ -78,6 +79,14 @@ def _ping_body(**overrides) -> dict:
     }
     body.update(overrides)
     return body
+
+
+async def _verify_email_in_db(db_session, user_id: str):
+    """Set email_verified=True for the given user directly in DB."""
+    result = await db_session.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one()
+    user.email_verified = True
+    await db_session.commit()
 
 
 async def _start_search(app_client, access_token):
@@ -197,6 +206,7 @@ async def test_ping_outside_schedule_returns_search_false(app_client, db_session
     """POST /ping when is_active but outside working hours -> search=false."""
     reg = await _register(app_client, email="outside@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="outside-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
     user_id = UUID(reg["user_id"])
@@ -232,6 +242,7 @@ async def test_ping_within_schedule_returns_search_true(app_client, db_session):
     """POST /ping when is_active and within working hours -> search=true."""
     reg = await _register(app_client, email="within@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="within-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
     user_id = UUID(reg["user_id"])
@@ -269,6 +280,7 @@ async def test_ping_overnight_schedule_returns_search_true(app_client, db_sessio
     """POST /ping during overnight shift (started yesterday) -> search=true."""
     reg = await _register(app_client, email="overnight@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="overnight-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
     user_id = UUID(reg["user_id"])
@@ -302,6 +314,7 @@ async def test_ping_batch_dedup_first_saves_second_skips(app_client, db_session)
     """Two pings with same batch_id -> only first saves accept_failures."""
     reg = await _register(app_client, email="dedup@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="dedup-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     # Default filters: working_time=24, all days → always within schedule
 
@@ -388,6 +401,7 @@ async def test_ping_happy_path_complete_response(app_client, db_session):
     """POST /ping with all fields -> correct response + device state updated."""
     reg = await _register(app_client, email="happy@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="happy-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     # Default filters: working_time=24, all days, min_price=20.0
 
@@ -451,6 +465,7 @@ async def test_ping_e2e_flow(app_client, db_session):
     assert resp1.json()["interval_seconds"] == 60
 
     # 4. Start search
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
     # 5. Second ping — search active, 24h schedule → search=true
@@ -479,6 +494,7 @@ async def test_ping_concurrent_no_duplicate_failures(app_client, db_session):
     """Three pings with same batch_id -> only 2 failures saved (from first ping)."""
     reg = await _register(app_client, email="concurrent@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="concurrent-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
     stats = {
@@ -533,6 +549,7 @@ async def test_ping_non_working_day_returns_search_false(app_client, db_session)
     """
     reg = await _register(app_client, email="workdays@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="workdays-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
     user_id = UUID(reg["user_id"])
