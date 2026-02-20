@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from unittest.mock import patch
 from uuid import UUID
@@ -6,6 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from app.models.accept_failure import AcceptFailure
+from app.models.app_config import AppConfig
 from app.models.paired_device import PairedDevice
 from app.models.search_filters import SearchFilters
 from app.models.user import User
@@ -25,9 +27,9 @@ _TEST_PASSWORD = "securePass1"
 
 
 def _patch_now(target_now: datetime):
-    """Patch datetime in ping_service so that datetime.now(tz) returns *target_now*.
+    """Patch datetime in ping_service and ping router so that datetime.now(tz) returns *target_now*.
 
-    Replaces the datetime class inside ping_service with a thin subclass
+    Replaces the datetime class inside ping_service and ping router with a thin subclass
     that overrides now() while keeping the constructor intact.
     """
     real_datetime = datetime
@@ -39,7 +41,17 @@ def _patch_now(target_now: datetime):
                 return target_now.astimezone(tz)
             return target_now
 
-    return patch("app.services.ping_service.datetime", _FakeDatetime)
+    import contextlib
+
+    @contextlib.contextmanager
+    def _combined():
+        with (
+            patch("app.services.ping_service.datetime", _FakeDatetime),
+            patch("app.routers.ping.datetime", _FakeDatetime),
+        ):
+            yield
+
+    return _combined()
 
 
 async def _register(app_client, email="ping@example.com"):
@@ -574,3 +586,120 @@ async def test_ping_non_working_day_returns_search_false(app_client, db_session)
     data = resp.json()
     assert data["search"] is False
     assert data["interval_seconds"] == 60
+
+
+# ---------------------------------------------------------------------------
+# Test 14: dynamic interval — active search with interval config returns dynamic value
+# ---------------------------------------------------------------------------
+
+_WEIGHTS = [
+    5.23,
+    5.19,
+    4.97,
+    4.28,
+    3.07,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    3.69,
+    5.10,
+    6.24,
+    4.96,
+    5.06,
+    5.18,
+    4.59,
+    4.57,
+    5.91,
+    5.58,
+    5.98,
+    5.29,
+    5.15,
+    4.96,
+]
+
+
+async def _seed_interval_configs(db_session):
+    """Seed interval configs in DB for dynamic interval tests."""
+    db_session.add(AppConfig(key="requests_per_day", value="1920"))
+    db_session.add(AppConfig(key="requests_per_hour", value=json.dumps(_WEIGHTS)))
+    await db_session.commit()
+
+
+async def test_ping_dynamic_interval_peak_hour(app_client, db_session):
+    """POST /ping at peak hour with interval config -> dynamic interval_seconds."""
+    reg = await _register(app_client, email="dynamic@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="dynamic-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
+    await _start_search(app_client, reg["access_token"])
+    await _seed_interval_configs(db_session)
+
+    # Wednesday 12:30 UTC -> hour 12, weight 6.24
+    # 6.24% of 1920 = ~120 rph -> 30s total -> 30 - 15 = 15s interval
+    now = datetime(2024, 3, 13, 12, 30, tzinfo=ZoneInfo("UTC"))
+    with _patch_now(now):
+        resp = await app_client.post(
+            PING_URL,
+            json=_ping_body(timezone="UTC", last_cycle_duration_ms=15000),
+            headers=_device_headers(pairing["device_token"], "dynamic-dev"),
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["search"] is True
+    assert data["interval_seconds"] == 15
+
+
+# ---------------------------------------------------------------------------
+# Test 15: dynamic interval — off-peak hour returns longer interval
+# ---------------------------------------------------------------------------
+
+
+async def test_ping_dynamic_interval_off_peak_hour(app_client, db_session):
+    """POST /ping at off-peak hour with interval config -> longer interval."""
+    reg = await _register(app_client, email="offpeak@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="offpeak-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
+    await _start_search(app_client, reg["access_token"])
+    await _seed_interval_configs(db_session)
+
+    # Wednesday 05:30 UTC -> hour 5, weight 1.0
+    # 1.0% of 1920 = 19.2 rph -> 187.5s total -> 187.5 - 15 = 172.5 -> 172s
+    now = datetime(2024, 3, 13, 5, 30, tzinfo=ZoneInfo("UTC"))
+    with _patch_now(now):
+        resp = await app_client.post(
+            PING_URL,
+            json=_ping_body(timezone="UTC", last_cycle_duration_ms=15000),
+            headers=_device_headers(pairing["device_token"], "offpeak-dev"),
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["search"] is True
+    assert data["interval_seconds"] == 172
+
+
+# ---------------------------------------------------------------------------
+# Test 16: no interval config in DB -> fallback to DEFAULT_SEARCH_INTERVAL_SECONDS
+# ---------------------------------------------------------------------------
+
+
+async def test_ping_no_interval_config_falls_back_to_default(app_client, db_session):
+    """POST /ping without interval config -> default 30s interval."""
+    reg = await _register(app_client, email="fallback@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="fallback-dev")
+    await _verify_email_in_db(db_session, reg["user_id"])
+    await _start_search(app_client, reg["access_token"])
+    # No _seed_interval_configs call -> fallback behavior
+
+    resp = await app_client.post(
+        PING_URL,
+        json=_ping_body(),
+        headers=_device_headers(pairing["device_token"], "fallback-dev"),
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["search"] is True
+    assert data["interval_seconds"] == 30

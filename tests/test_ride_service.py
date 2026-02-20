@@ -266,6 +266,60 @@ async def test_get_user_ride_events_empty_for_no_rides(db_session):
     assert events == []
 
 
+async def test_get_user_ride_events_since_filters_old_events(db_session):
+    """Since parameter should exclude events created before the cutoff."""
+    user = await _create_user(db_session)
+    base_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+    old_ride = Ride(
+        user_id=user.id,
+        idempotency_key=str(uuid4()),
+        event_type="ACCEPTED",
+        ride_data={"price": 10.0},
+        created_at=base_time,
+    )
+    new_ride = Ride(
+        user_id=user.id,
+        idempotency_key=str(uuid4()),
+        event_type="ACCEPTED",
+        ride_data={"price": 20.0},
+        created_at=base_time + timedelta(days=60),
+    )
+    db_session.add_all([old_ride, new_ride])
+    await db_session.flush()
+
+    cutoff = base_time + timedelta(days=30)
+    events, total = await get_user_ride_events(
+        db_session, user.id, limit=10, offset=0, since=cutoff
+    )
+
+    assert total == 1
+    assert len(events) == 1
+    assert events[0].id == new_ride.id
+
+
+async def test_get_user_ride_events_since_none_returns_all(db_session):
+    """Without since parameter, all events should be returned."""
+    user = await _create_user(db_session)
+    base_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+    for i in range(3):
+        ride = Ride(
+            user_id=user.id,
+            idempotency_key=str(uuid4()),
+            event_type="ACCEPTED",
+            ride_data={"price": 10.0 + i},
+            created_at=base_time + timedelta(days=i * 30),
+        )
+        db_session.add(ride)
+    await db_session.flush()
+
+    events, total = await get_user_ride_events(db_session, user.id, limit=10, offset=0, since=None)
+
+    assert total == 3
+    assert len(events) == 3
+
+
 async def test_get_user_ride_events_scoped_to_user(db_session):
     """Should only return rides for the specified user."""
     user_a = await _create_user(db_session, "a@example.com")

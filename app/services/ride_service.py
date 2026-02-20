@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -71,7 +72,11 @@ async def create_ride(
 
 
 async def get_user_ride_events(
-    db: AsyncSession, user_id: UUID, limit: int, offset: int
+    db: AsyncSession,
+    user_id: UUID,
+    limit: int,
+    offset: int,
+    since: datetime | None = None,
 ) -> tuple[list[Ride], int]:
     """Get paginated ride events for a user, ordered by created_at descending.
 
@@ -82,21 +87,20 @@ async def get_user_ride_events(
         user_id: The user's UUID.
         limit: Maximum number of events to return.
         offset: Number of events to skip.
+        since: If provided, only return events created at or after this time.
 
     Returns:
         Tuple of (list of Ride events, total count).
     """
-    count_result = await db.execute(
-        select(func.count()).select_from(Ride).where(Ride.user_id == user_id)
-    )
+    filters = [Ride.user_id == user_id]
+    if since is not None:
+        filters.append(Ride.created_at >= since)
+
+    count_result = await db.execute(select(func.count()).select_from(Ride).where(*filters))
     total = count_result.scalar_one()
 
     result = await db.execute(
-        select(Ride)
-        .where(Ride.user_id == user_id)
-        .order_by(Ride.created_at.desc())
-        .offset(offset)
-        .limit(limit)
+        select(Ride).where(*filters).order_by(Ride.created_at.desc()).offset(offset).limit(limit)
     )
     events = list(result.scalars().all())
 

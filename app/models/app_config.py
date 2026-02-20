@@ -12,7 +12,7 @@ class AppConfig(Base):
     __tablename__ = "app_configs"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value: Mapped[str] = mapped_column(String(500), nullable=False)
+    value: Mapped[str] = mapped_column(String(1000), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

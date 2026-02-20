@@ -36,6 +36,7 @@ class PingRequest(BaseModel):
     app_version: str = Field(min_length=1)
     device_health: DeviceHealth | None = None
     stats: PingStats | None = None
+    last_cycle_duration_ms: int | None = None
 
 
 class PingFiltersResponse(BaseModel):
