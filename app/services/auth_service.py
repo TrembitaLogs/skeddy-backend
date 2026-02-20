@@ -21,12 +21,17 @@ logger = logging.getLogger(__name__)
 
 _ROUNDS = 12
 
-# --- Password reset token Redis key schema ---
-# reset_token:{sha256_hash} → user_id (string), TTL: 1 hour
-# user_reset:{user_id}      → token_hash (string), TTL: 1 hour (old-token invalidation)
-_RESET_TOKEN_PREFIX = "reset_token:"
-_USER_RESET_PREFIX = "user_reset:"
-_RESET_TOKEN_TTL = 3600  # 1 hour
+# --- Password reset code Redis key schema (code-based) ---
+# reset_code:{email} → JSON {"code_hash": "sha256...", "attempts": 0}, TTL: 15 min
+_RESET_CODE_PREFIX = "reset_code:"
+_RESET_CODE_TTL = 900  # 15 minutes
+_RESET_CODE_MAX_ATTEMPTS = 5
+
+# --- Email verification code Redis key schema (code-based) ---
+# verify_code:{user_id} → JSON {"code_hash": "sha256...", "attempts": 0}, TTL: 24 hours
+_VERIFY_CODE_PREFIX = "verify_code:"
+_VERIFY_CODE_TTL = 86400  # 24 hours
+_VERIFY_CODE_MAX_ATTEMPTS = 5
 
 
 def hash_password(password: str) -> str:
@@ -97,38 +102,124 @@ async def delete_user_refresh_tokens(db: AsyncSession, user_id: UUID) -> int:
     return result.rowcount  # type: ignore[no-any-return, attr-defined]
 
 
-async def store_reset_token(redis: Redis, user_id: UUID, token_hash: str) -> None:
-    """Store a password reset token hash in Redis with 1-hour TTL.
+async def store_reset_code(redis: Redis, email: str, code: str) -> None:
+    """Store a password reset code hash in Redis with 15-minute TTL.
 
-    Invalidates any previous reset token for the same user before storing.
+    Any previous unused code for the same email is implicitly overwritten
+    because the key ``reset_code:{email}`` is the same.
     """
-    old_token_hash = await redis.get(f"{_USER_RESET_PREFIX}{user_id}")
-    if old_token_hash:
-        await redis.delete(f"{_RESET_TOKEN_PREFIX}{old_token_hash}")
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    await redis.setex(
+        f"{_RESET_CODE_PREFIX}{email}",
+        _RESET_CODE_TTL,
+        json.dumps({"code_hash": code_hash, "attempts": 0}),
+    )
 
-    await redis.setex(f"{_RESET_TOKEN_PREFIX}{token_hash}", _RESET_TOKEN_TTL, str(user_id))
-    await redis.setex(f"{_USER_RESET_PREFIX}{user_id}", _RESET_TOKEN_TTL, token_hash)
 
+async def verify_reset_code(redis: Redis, email: str, code: str) -> bool:
+    """Verify a 6-digit password reset code against the stored hash.
 
-async def verify_reset_token(redis: Redis, token_hash: str) -> UUID | None:
-    """Look up a reset token in Redis and return the associated user_id.
+    Increments the attempt counter on each wrong guess.  After
+    ``_RESET_CODE_MAX_ATTEMPTS`` wrong attempts the code is invalidated.
 
-    Returns None if the token does not exist or has expired.
+    Returns ``True`` when the code is valid.
+
+    Raises ``HTTPException(401)`` with ``INVALID_RESET_CODE`` when:
+    - no code exists for this email (expired or never requested)
+    - the code is wrong
+    - the attempt limit has been reached
     """
-    user_id_str = await redis.get(f"{_RESET_TOKEN_PREFIX}{token_hash}")
-    if user_id_str is None:
-        return None
-    return UUID(user_id_str)
+    key = f"{_RESET_CODE_PREFIX}{email}"
+    raw = await redis.get(key)
+    if raw is None:
+        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
+
+    data = json.loads(raw)
+
+    # Check attempt limit first
+    if data["attempts"] >= _RESET_CODE_MAX_ATTEMPTS:
+        await redis.delete(key)
+        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
+
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+
+    if code_hash != data["code_hash"]:
+        # Increment attempts, preserve remaining TTL
+        data["attempts"] += 1
+        ttl = await redis.ttl(key)
+        if ttl > 0:
+            await redis.setex(key, ttl, json.dumps(data))
+        else:
+            # Key is about to expire anyway - just delete
+            await redis.delete(key)
+        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
+
+    return True
 
 
-async def delete_reset_token(redis: Redis, token_hash: str, user_id: UUID | None = None) -> None:
-    """Delete a reset token from Redis.
+async def delete_reset_code(redis: Redis, email: str) -> None:
+    """Delete a reset code from Redis after successful password reset."""
+    await redis.delete(f"{_RESET_CODE_PREFIX}{email}")
 
-    If user_id is provided, also removes the user tracking key.
+
+async def store_verify_code(redis: Redis, user_id: str, code: str) -> None:
+    """Store an email verification code hash in Redis with 24-hour TTL.
+
+    Any previous unused code for the same user is implicitly overwritten
+    because the key ``verify_code:{user_id}`` is the same.
     """
-    await redis.delete(f"{_RESET_TOKEN_PREFIX}{token_hash}")
-    if user_id is not None:
-        await redis.delete(f"{_USER_RESET_PREFIX}{user_id}")
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    await redis.setex(
+        f"{_VERIFY_CODE_PREFIX}{user_id}",
+        _VERIFY_CODE_TTL,
+        json.dumps({"code_hash": code_hash, "attempts": 0}),
+    )
+
+
+async def verify_verify_code(redis: Redis, user_id: str, code: str) -> bool:
+    """Verify a 6-digit email verification code against the stored hash.
+
+    Increments the attempt counter on each wrong guess.  After
+    ``_VERIFY_CODE_MAX_ATTEMPTS`` wrong attempts the code is invalidated.
+
+    Returns ``True`` when the code is valid.
+
+    Raises ``HTTPException(401)`` with ``INVALID_VERIFICATION_CODE`` when:
+    - no code exists for this user (expired or never requested)
+    - the code is wrong
+    - the attempt limit has been reached
+    """
+    key = f"{_VERIFY_CODE_PREFIX}{user_id}"
+    raw = await redis.get(key)
+    if raw is None:
+        raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
+
+    data = json.loads(raw)
+
+    # Check attempt limit first
+    if data["attempts"] >= _VERIFY_CODE_MAX_ATTEMPTS:
+        await redis.delete(key)
+        raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
+
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+
+    if code_hash != data["code_hash"]:
+        # Increment attempts, preserve remaining TTL
+        data["attempts"] += 1
+        ttl = await redis.ttl(key)
+        if ttl > 0:
+            await redis.setex(key, ttl, json.dumps(data))
+        else:
+            # Key is about to expire anyway - just delete
+            await redis.delete(key)
+        raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
+
+    return True
+
+
+async def delete_verify_code(redis: Redis, user_id: str) -> None:
+    """Delete a verification code from Redis after successful verification."""
+    await redis.delete(f"{_VERIFY_CODE_PREFIX}{user_id}")
 
 
 async def get_user_by_phone(db: AsyncSession, phone_number: str) -> User | None:

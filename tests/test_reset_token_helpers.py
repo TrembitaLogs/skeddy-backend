@@ -1,146 +1,148 @@
-"""Tests for password reset token Redis helper functions.
+"""Tests for password reset Redis helper functions.
 
-Test strategy (task 11.3):
-1. store_reset_token → verify_reset_token returns correct user_id
-2. verify_reset_token with non-existent token → None
-3. delete_reset_token → verify_reset_token returns None
-4. TTL expiration (verify setex called with correct TTL)
-5. Tests with mocked Redis client (all tests use fake_redis fixture)
+Covers:
+- store_reset_code: code storage with hash and attempts
+- verify_reset_code: code verification with attempt counting
+- delete_reset_code: code cleanup after successful reset
 """
 
 import hashlib
-from uuid import uuid4
+import json
+
+import pytest
+from fastapi import HTTPException
 
 from app.services.auth_service import (
-    delete_reset_token,
-    store_reset_token,
-    verify_reset_token,
+    _RESET_CODE_TTL,
+    delete_reset_code,
+    store_reset_code,
+    verify_reset_code,
 )
 
-# --- Test Strategy 1: store → verify returns correct user_id ---
+# ===========================================================================
+# store_reset_code tests
+# ===========================================================================
 
 
-async def test_store_then_verify_returns_correct_user_id(fake_redis):
-    """store_reset_token + verify_reset_token returns the stored user_id."""
-    user_id = uuid4()
-    token_hash = hashlib.sha256(b"test-token").hexdigest()
+async def test_store_reset_code_stores_hash_and_zero_attempts(fake_redis):
+    """store_reset_code stores JSON with code_hash and attempts=0."""
+    code = "847291"
+    email = "test@example.com"
 
-    await store_reset_token(fake_redis, user_id, token_hash)
-    result = await verify_reset_token(fake_redis, token_hash)
+    await store_reset_code(fake_redis, email, code)
 
-    assert result == user_id
-
-
-# --- Test Strategy 2: verify non-existent token → None ---
-
-
-async def test_verify_nonexistent_token_returns_none(fake_redis):
-    """verify_reset_token with unknown hash returns None."""
-    token_hash = hashlib.sha256(b"does-not-exist").hexdigest()
-
-    result = await verify_reset_token(fake_redis, token_hash)
-
-    assert result is None
+    stored = await fake_redis.get(f"reset_code:{email}")
+    assert stored is not None
+    data = json.loads(stored)
+    expected_hash = hashlib.sha256(code.encode()).hexdigest()
+    assert data["code_hash"] == expected_hash
+    assert data["attempts"] == 0
 
 
-# --- Test Strategy 3: delete → verify returns None ---
+async def test_store_reset_code_uses_correct_ttl(fake_redis):
+    """store_reset_code calls setex with 900-second TTL."""
+    await store_reset_code(fake_redis, "ttl@example.com", "123456")
+
+    setex_calls = fake_redis.setex.call_args_list
+    code_setex = [c for c in setex_calls if "reset_code:ttl@example.com" in str(c)]
+    assert len(code_setex) == 1
+    assert code_setex[0][0][1] == _RESET_CODE_TTL
 
 
-async def test_delete_then_verify_returns_none(fake_redis):
-    """After delete_reset_token, verify_reset_token returns None."""
-    user_id = uuid4()
-    token_hash = hashlib.sha256(b"delete-me").hexdigest()
+async def test_store_reset_code_overwrites_previous(fake_redis):
+    """Second store_reset_code for the same email overwrites the first."""
+    email = "overwrite@example.com"
 
-    await store_reset_token(fake_redis, user_id, token_hash)
-    await delete_reset_token(fake_redis, token_hash, user_id)
+    await store_reset_code(fake_redis, email, "111111")
+    await store_reset_code(fake_redis, email, "222222")
 
-    result = await verify_reset_token(fake_redis, token_hash)
-    assert result is None
-
-
-async def test_delete_also_removes_user_tracking_key(fake_redis):
-    """delete_reset_token with user_id removes the user_reset tracking key."""
-    user_id = uuid4()
-    token_hash = hashlib.sha256(b"track-me").hexdigest()
-
-    await store_reset_token(fake_redis, user_id, token_hash)
-    await delete_reset_token(fake_redis, token_hash, user_id)
-
-    # Verify tracking key is also gone
-    tracking_value = await fake_redis.get(f"user_reset:{user_id}")
-    assert tracking_value is None
+    stored = await fake_redis.get(f"reset_code:{email}")
+    data = json.loads(stored)
+    expected_hash = hashlib.sha256(b"222222").hexdigest()
+    assert data["code_hash"] == expected_hash
+    assert data["attempts"] == 0
 
 
-async def test_delete_without_user_id_keeps_tracking_key(fake_redis):
-    """delete_reset_token without user_id leaves the tracking key intact."""
-    user_id = uuid4()
-    token_hash = hashlib.sha256(b"partial-delete").hexdigest()
+async def test_store_reset_code_different_emails_independent(fake_redis):
+    """Codes for different emails are independent."""
+    await store_reset_code(fake_redis, "a@example.com", "111111")
+    await store_reset_code(fake_redis, "b@example.com", "222222")
 
-    await store_reset_token(fake_redis, user_id, token_hash)
-    await delete_reset_token(fake_redis, token_hash)
+    data_a = json.loads(await fake_redis.get("reset_code:a@example.com"))
+    data_b = json.loads(await fake_redis.get("reset_code:b@example.com"))
 
-    # Token itself is gone
-    assert await verify_reset_token(fake_redis, token_hash) is None
-    # But tracking key remains
-    tracking_value = await fake_redis.get(f"user_reset:{user_id}")
-    assert tracking_value == token_hash
+    assert data_a["code_hash"] == hashlib.sha256(b"111111").hexdigest()
+    assert data_b["code_hash"] == hashlib.sha256(b"222222").hexdigest()
 
 
-# --- Test Strategy 4: TTL expiration (verify setex called with correct TTL) ---
+# ===========================================================================
+# verify_reset_code tests
+# ===========================================================================
 
 
-async def test_store_uses_correct_ttl(fake_redis):
-    """store_reset_token calls setex with 3600-second TTL for both keys."""
-    user_id = uuid4()
-    token_hash = hashlib.sha256(b"ttl-test").hexdigest()
+async def test_verify_reset_code_valid_code_returns_true(fake_redis):
+    """verify_reset_code returns True for a valid code."""
+    email = "valid@example.com"
+    code = "847291"
+    await store_reset_code(fake_redis, email, code)
 
-    await store_reset_token(fake_redis, user_id, token_hash)
-
-    # Check token key TTL
-    token_setex = [
-        c for c in fake_redis.setex.call_args_list if f"reset_token:{token_hash}" in str(c)
-    ]
-    assert len(token_setex) == 1
-    assert token_setex[0][0][1] == 3600
-
-    # Check tracking key TTL
-    tracking_setex = [
-        c for c in fake_redis.setex.call_args_list if f"user_reset:{user_id}" in str(c)
-    ]
-    assert len(tracking_setex) == 1
-    assert tracking_setex[0][0][1] == 3600
+    result = await verify_reset_code(fake_redis, email, code)
+    assert result is True
 
 
-# --- Test Strategy 5: mocked Redis (covered by fake_redis fixture above) ---
-# Additional: old token invalidation on second store
+async def test_verify_reset_code_no_code_raises_401(fake_redis):
+    """verify_reset_code raises 401 when no code exists for email."""
+    with pytest.raises(HTTPException) as exc_info:
+        await verify_reset_code(fake_redis, "nocode@example.com", "123456")
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "INVALID_RESET_CODE"
 
 
-async def test_store_invalidates_previous_token(fake_redis):
-    """Second store_reset_token for the same user invalidates the first token."""
-    user_id = uuid4()
-    first_hash = hashlib.sha256(b"first-token").hexdigest()
-    second_hash = hashlib.sha256(b"second-token").hexdigest()
+async def test_verify_reset_code_wrong_code_increments_attempts(fake_redis):
+    """verify_reset_code increments attempts on wrong code."""
+    email = "wrong@example.com"
+    await store_reset_code(fake_redis, email, "847291")
 
-    await store_reset_token(fake_redis, user_id, first_hash)
-    assert await verify_reset_token(fake_redis, first_hash) == user_id
+    with pytest.raises(HTTPException):
+        await verify_reset_code(fake_redis, email, "000000")
 
-    await store_reset_token(fake_redis, user_id, second_hash)
-
-    # First token invalidated
-    assert await verify_reset_token(fake_redis, first_hash) is None
-    # Second token active
-    assert await verify_reset_token(fake_redis, second_hash) == user_id
+    stored = await fake_redis.get(f"reset_code:{email}")
+    data = json.loads(stored)
+    assert data["attempts"] == 1
 
 
-async def test_store_different_users_independent(fake_redis):
-    """Tokens for different users are independent — storing for one does not affect another."""
-    user_a = uuid4()
-    user_b = uuid4()
-    hash_a = hashlib.sha256(b"token-a").hexdigest()
-    hash_b = hashlib.sha256(b"token-b").hexdigest()
+async def test_verify_reset_code_5_wrong_attempts_deletes_code(fake_redis):
+    """After 5 wrong attempts, the code is deleted from Redis."""
+    email = "maxattempts@example.com"
+    await store_reset_code(fake_redis, email, "847291")
 
-    await store_reset_token(fake_redis, user_a, hash_a)
-    await store_reset_token(fake_redis, user_b, hash_b)
+    # Manually set attempts to 5 to simulate 5 prior failures
+    code_hash = hashlib.sha256(b"847291").hexdigest()
+    await fake_redis.setex(
+        f"reset_code:{email}",
+        900,
+        json.dumps({"code_hash": code_hash, "attempts": 5}),
+    )
 
-    assert await verify_reset_token(fake_redis, hash_a) == user_a
-    assert await verify_reset_token(fake_redis, hash_b) == user_b
+    with pytest.raises(HTTPException) as exc_info:
+        await verify_reset_code(fake_redis, email, "847291")
+
+    assert exc_info.value.status_code == 401
+    # Code should be deleted
+    assert await fake_redis.get(f"reset_code:{email}") is None
+
+
+# ===========================================================================
+# delete_reset_code tests
+# ===========================================================================
+
+
+async def test_delete_reset_code_removes_key(fake_redis):
+    """delete_reset_code removes the reset_code key from Redis."""
+    email = "delete@example.com"
+    await store_reset_code(fake_redis, email, "123456")
+
+    await delete_reset_code(fake_redis, email)
+
+    assert await fake_redis.get(f"reset_code:{email}") is None

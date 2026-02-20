@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.models.paired_device import PairedDevice
+from app.models.user import User
 
 SEARCH_START_URL = "/api/v1/search/start"
 SEARCH_STOP_URL = "/api/v1/search/stop"
@@ -51,6 +52,14 @@ def _device_headers(device_token: str, device_id: str) -> dict:
     return {"X-Device-Token": device_token, "X-Device-Id": device_id}
 
 
+async def _verify_email_in_db(db_session, user_id: str):
+    """Set email_verified=True for the given user directly in DB."""
+    result = await db_session.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one()
+    user.email_verified = True
+    await db_session.commit()
+
+
 # --- Test Strategy 1: POST /search/start without JWT → 401 ---
 
 
@@ -63,9 +72,10 @@ async def test_start_search_without_jwt_returns_401(app_client):
 # --- POST /search/start without paired device → 400 ---
 
 
-async def test_start_search_without_paired_device_returns_400(app_client):
+async def test_start_search_without_paired_device_returns_400(app_client, db_session):
     """POST /search/start with no paired device -> 400 NO_PAIRED_DEVICE."""
     reg = await _register_and_get_tokens(app_client, email="nopair@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
 
     response = await app_client.post(
         SEARCH_START_URL,
@@ -79,9 +89,10 @@ async def test_start_search_without_paired_device_returns_400(app_client):
 # --- Test Strategy 2: POST /search/start → 200, {"ok": true} ---
 
 
-async def test_start_search_returns_ok(app_client):
+async def test_start_search_returns_ok(app_client, db_session):
     """POST /search/start with paired device -> 200 {"ok": true}."""
     reg = await _register_and_get_tokens(app_client, email="start@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _pair_device(app_client, reg["access_token"])
 
     response = await app_client.post(
@@ -96,9 +107,10 @@ async def test_start_search_returns_ok(app_client):
 # --- Test Strategy 3: POST /search/start twice → 200 (idempotent) ---
 
 
-async def test_start_search_twice_is_idempotent(app_client):
+async def test_start_search_twice_is_idempotent(app_client, db_session):
     """POST /search/start called twice -> both return 200."""
     reg = await _register_and_get_tokens(app_client, email="twice@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _pair_device(app_client, reg["access_token"])
     headers = _auth_header(reg["access_token"])
 
@@ -208,9 +220,10 @@ async def test_status_with_stale_ping_is_offline(app_client, db_session):
 # --- Verify start actually sets is_active to true ---
 
 
-async def test_start_then_status_shows_active(app_client):
+async def test_start_then_status_shows_active(app_client, db_session):
     """POST /search/start then GET /search/status -> is_active=True."""
     reg = await _register_and_get_tokens(app_client, email="active@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _pair_device(app_client, reg["access_token"])
     headers = _auth_header(reg["access_token"])
 
@@ -225,9 +238,10 @@ async def test_start_then_status_shows_active(app_client):
 # --- Verify stop after start sets is_active to false ---
 
 
-async def test_start_then_stop_then_status_shows_inactive(app_client):
+async def test_start_then_stop_then_status_shows_inactive(app_client, db_session):
     """POST /search/start then /stop then GET /search/status -> is_active=False."""
     reg = await _register_and_get_tokens(app_client, email="inactive@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     await _pair_device(app_client, reg["access_token"])
     headers = _auth_header(reg["access_token"])
 
@@ -413,3 +427,90 @@ async def test_status_force_update_false_when_no_version(app_client, db_session)
 
     assert response.status_code == 200
     assert response.json()["force_update"] is False
+
+
+# ===== EMAIL_NOT_VERIFIED guard on POST /search/start (Task 22) =====
+
+
+# --- Test Strategy 1: Unverified user → POST /search/start → 403 EMAIL_NOT_VERIFIED ---
+
+
+async def test_start_search_unverified_email_returns_403(app_client):
+    """POST /search/start with email_verified=false -> 403 EMAIL_NOT_VERIFIED."""
+    reg = await _register_and_get_tokens(app_client, email="unverified@example.com")
+
+    response = await app_client.post(
+        SEARCH_START_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "EMAIL_NOT_VERIFIED"
+
+
+# --- Test Strategy 2-3: Verify email → POST /search/start → 200 OK (or 400 no device) ---
+
+
+async def test_start_search_after_verify_email_returns_400_no_device(app_client, db_session):
+    """After email verification, POST /search/start without device -> 400 NO_PAIRED_DEVICE."""
+    reg = await _register_and_get_tokens(app_client, email="verify_then_start@example.com")
+    headers = _auth_header(reg["access_token"])
+
+    # Unverified → 403
+    resp_before = await app_client.post(SEARCH_START_URL, headers=headers)
+    assert resp_before.status_code == 403
+    assert resp_before.json()["error"]["code"] == "EMAIL_NOT_VERIFIED"
+
+    # Verify email
+    await _verify_email_in_db(db_session, reg["user_id"])
+
+    # Now passes email check but fails on no device
+    resp_after = await app_client.post(SEARCH_START_URL, headers=headers)
+    assert resp_after.status_code == 400
+    assert resp_after.json()["error"]["code"] == "NO_PAIRED_DEVICE"
+
+
+# --- Test Strategy 4: Verified user (old user) → POST /search/start → 200 OK ---
+
+
+async def test_start_search_verified_user_with_device_returns_ok(app_client, db_session):
+    """Verified user with paired device -> POST /search/start -> 200 {"ok": true}."""
+    reg = await _register_and_get_tokens(app_client, email="verified_ok@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
+    await _pair_device(app_client, reg["access_token"])
+
+    response = await app_client.post(
+        SEARCH_START_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+# --- Test Strategy 5: Other endpoints work without email verification ---
+
+
+async def test_stop_search_works_without_email_verification(app_client):
+    """POST /search/stop works for unverified users (no email check)."""
+    reg = await _register_and_get_tokens(app_client, email="unverified_stop@example.com")
+
+    response = await app_client.post(
+        SEARCH_STOP_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+async def test_status_works_without_email_verification(app_client):
+    """GET /search/status works for unverified users (no email check)."""
+    reg = await _register_and_get_tokens(app_client, email="unverified_status@example.com")
+
+    response = await app_client.get(
+        SEARCH_STATUS_URL,
+        headers=_auth_header(reg["access_token"]),
+    )
+
+    assert response.status_code == 200

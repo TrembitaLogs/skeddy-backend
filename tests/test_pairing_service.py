@@ -139,7 +139,7 @@ async def test_generate_pairing_code_invalidates_previous_code():
     assert f"pairing_code:{code1}" in fake_redis._store
 
     # Generate second code with a deterministic value to avoid collision
-    with patch("app.services.pairing_service.random.randint", return_value=999999):
+    with patch("app.utils.codes.random.randint", return_value=999999):
         code2, _ = await generate_pairing_code(fake_redis, user_id)
 
     assert code2 == "999999"

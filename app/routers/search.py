@@ -33,6 +33,8 @@ async def start_search(
     db: AsyncSession = Depends(get_db),
 ):
     """Start search for the authenticated user. Requires a paired device."""
+    if not current_user.email_verified:
+        raise HTTPException(status_code=403, detail="EMAIL_NOT_VERIFIED")
     device = await get_device_by_user_id(db, current_user.id)
     if device is None:
         raise HTTPException(status_code=400, detail="NO_PAIRED_DEVICE")

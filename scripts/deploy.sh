@@ -18,8 +18,9 @@ echo "${CR_PAT}" | docker login ghcr.io -u "${CR_USER}" --password-stdin
 echo "==> Pulling image..."
 docker pull "${FULL_IMAGE}"
 
-# --- 3. Export image ref for docker-compose.prod.yml ---
+# --- 3. Export image ref and version for docker-compose.prod.yml ---
 export APP_IMAGE="${FULL_IMAGE}"
+export APP_VERSION="${IMAGE_TAG}"
 
 # --- 4. Run migrations (with db dependency) ---
 echo "==> Running database migrations..."

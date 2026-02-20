@@ -1,4 +1,24 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _get_app_version() -> str:
+    """Get app version from APP_VERSION env var or pyproject.toml."""
+    import os
+
+    env_version = os.getenv("APP_VERSION", "")
+    if env_version:
+        return env_version
+    try:
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            data = tomllib.load(f)
+        return str(data["project"]["version"])
+    except Exception:
+        return "dev"
 
 
 class Settings(BaseSettings):
@@ -48,6 +68,9 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     DEBUG: bool = False
+
+    # App version (set via APP_VERSION env var in production, falls back to pyproject.toml)
+    APP_VERSION: str = _get_app_version()
 
 
 settings = Settings()

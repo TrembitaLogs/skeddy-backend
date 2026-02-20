@@ -83,7 +83,7 @@ def setup_admin(app):
         engine=engine,
         authentication_backend=authentication_backend,
         templates_dir="app/admin/templates",
-        title="Skeddy Admin",
+        title=f"Skeddy Admin v{settings.APP_VERSION}",
     )
 
     # Store app reference for ApiDocsView to generate OpenAPI schema

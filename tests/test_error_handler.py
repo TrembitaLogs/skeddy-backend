@@ -251,7 +251,7 @@ def test_error_messages_covers_all_known_codes():
         "INVALID_CREDENTIALS",
         "INVALID_OR_EXPIRED_TOKEN",
         "INVALID_TOKEN_PAYLOAD",
-        "INVALID_RESET_TOKEN",
+        "INVALID_RESET_CODE",
         "INVALID_REFRESH_TOKEN",
         "REFRESH_TOKEN_EXPIRED",
         "INVALID_CURRENT_PASSWORD",

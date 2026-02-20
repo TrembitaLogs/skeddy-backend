@@ -53,6 +53,9 @@ services:
     container_name: skeddy-app
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://skeddy:${DB_PASSWORD}@db:5432/skeddy
+      REDIS_URL: redis://redis:6379/0
     expose:
       - "8000"
     depends_on:

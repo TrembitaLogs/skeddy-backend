@@ -58,11 +58,16 @@ async def fake_redis():
     async def mock_exists(*keys):
         return sum(1 for key in keys if key in store)
 
+    async def mock_ttl(key):
+        # Return a positive TTL for existing keys, -2 for missing
+        return 900 if key in store else -2
+
     redis = AsyncMock()
     redis.get = AsyncMock(side_effect=mock_get)
     redis.setex = AsyncMock(side_effect=mock_setex)
     redis.delete = AsyncMock(side_effect=mock_delete)
     redis.exists = AsyncMock(side_effect=mock_exists)
+    redis.ttl = AsyncMock(side_effect=mock_ttl)
     redis._store = store
     return redis
 

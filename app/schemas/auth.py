@@ -45,6 +45,7 @@ class ProfileResponse(BaseModel):
 
     user_id: uuid.UUID
     email: str
+    email_verified: bool
     phone_number: str | None
     created_at: datetime
 
@@ -71,10 +72,17 @@ class RequestResetRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    """Reset password with token schema."""
+    """Reset password with 6-digit code schema."""
 
-    token: str
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
     new_password: str = Field(min_length=8)
+
+
+class VerifyEmailRequest(BaseModel):
+    """Verify email with 6-digit code schema."""
+
+    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class DeleteAccountRequest(BaseModel):

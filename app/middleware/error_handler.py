@@ -24,7 +24,9 @@ ERROR_MESSAGES: dict[str, str] = {
     "INVALID_CREDENTIALS": "Invalid email or password",
     "INVALID_OR_EXPIRED_TOKEN": "Invalid or expired token",
     "INVALID_TOKEN_PAYLOAD": "Invalid token payload",
-    "INVALID_RESET_TOKEN": "Invalid or expired reset token",
+    "INVALID_RESET_CODE": "Invalid or expired reset code",
+    "INVALID_VERIFICATION_CODE": "Invalid or expired verification code",
+    "ALREADY_VERIFIED": "Email already verified",
     "INVALID_REFRESH_TOKEN": "Invalid refresh token",
     "REFRESH_TOKEN_EXPIRED": "Refresh token has expired",
     "INVALID_CURRENT_PASSWORD": "Invalid current password",
@@ -44,6 +46,7 @@ ERROR_MESSAGES: dict[str, str] = {
     "VALIDATION_ERROR": "Invalid request data",
     # Resource
     "NO_PAIRED_DEVICE": "No paired device found",
+    "EMAIL_NOT_VERIFIED": "Please verify your email to start searching",
     # Rate limiting
     "RATE_LIMIT_EXCEEDED": "Rate limit exceeded",
     # Service
