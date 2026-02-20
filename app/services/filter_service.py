@@ -10,7 +10,11 @@ from app.schemas.filters import FiltersUpdateRequest
 
 async def get_user_filters(db: AsyncSession, user_id: UUID) -> SearchFilters:
     """Return the user's search filters, or a default instance if none exist."""
-    result = await db.execute(select(SearchFilters).where(SearchFilters.user_id == user_id))
+    result = await db.execute(
+        select(SearchFilters)
+        .where(SearchFilters.user_id == user_id)
+        .execution_options(populate_existing=True)
+    )
     filters = result.scalar_one_or_none()
     if filters is not None:
         return filters
