@@ -48,6 +48,7 @@ from app.services.auth_service import (
     verify_reset_code,
     verify_verify_code,
 )
+from app.services.credit_service import cache_balance, create_balance_with_bonus
 from app.services.email_service import send_password_reset_code, send_verification_code
 from app.utils.codes import generate_six_digit_code
 
@@ -85,6 +86,9 @@ async def register(
     search_status = SearchStatus(user_id=user.id)
     db.add_all([search_filters, search_status])
 
+    # Create credit balance with registration bonus (flush only, no commit)
+    credit_balance = await create_balance_with_bonus(user.id, db, redis)
+
     # Generate tokens
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token()
@@ -101,6 +105,9 @@ async def register(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
+
+    # Write-through Redis cache for credit balance (after commit per PRD)
+    await cache_balance(user.id, credit_balance.balance, redis)
 
     # Send verification email (failure must not break registration)
     code = generate_six_digit_code()

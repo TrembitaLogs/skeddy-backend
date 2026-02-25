@@ -16,6 +16,9 @@ class NotificationType(StrEnum):
 
     RIDE_ACCEPTED = "RIDE_ACCEPTED"
     SEARCH_OFFLINE = "SEARCH_OFFLINE"
+    CREDITS_DEPLETED = "CREDITS_DEPLETED"
+    CREDITS_LOW = "CREDITS_LOW"
+    RIDE_CREDIT_REFUNDED = "RIDE_CREDIT_REFUNDED"
 
 
 class RideAcceptedData(BaseModel):
@@ -59,6 +62,65 @@ def create_ride_accepted_payload(
         "pickup_time": data.pickup_time,
         "pickup_location": data.pickup_location,
         "dropoff_location": data.dropoff_location,
+    }
+
+
+def create_credits_depleted_payload() -> dict[str, str]:
+    """Create an FCM-compatible data payload for CREDITS_DEPLETED.
+
+    All values are strings (FCM data payload requirement).
+    """
+    return {"balance": "0"}
+
+
+class CreditsLowData(BaseModel):
+    """Validation model for CREDITS_LOW notification data payload."""
+
+    balance: int
+    threshold: int
+
+
+def create_credits_low_payload(
+    balance: int,
+    threshold: int,
+) -> dict[str, str]:
+    """Create a validated, FCM-compatible data payload for CREDITS_LOW.
+
+    Validates inputs via Pydantic and converts all values to strings.
+    """
+    data = CreditsLowData(balance=balance, threshold=threshold)
+    return {
+        "balance": str(data.balance),
+        "threshold": str(data.threshold),
+    }
+
+
+class RideCreditRefundedData(BaseModel):
+    """Validation model for RIDE_CREDIT_REFUNDED notification data payload."""
+
+    ride_id: UUID
+    credits_refunded: int
+    new_balance: int
+
+
+def create_ride_credit_refunded_payload(
+    ride_id: UUID,
+    credits_refunded: int,
+    new_balance: int,
+) -> dict[str, str]:
+    """Create a validated, FCM-compatible data payload for RIDE_CREDIT_REFUNDED.
+
+    Validates inputs via Pydantic and converts all values to strings.
+    """
+    data = RideCreditRefundedData(
+        ride_id=ride_id,
+        credits_refunded=credits_refunded,
+        new_balance=new_balance,
+    )
+    return {
+        "ride_id": str(data.ride_id),
+        "credits_refunded": str(data.credits_refunded),
+        "new_balance": str(data.new_balance),
     }
 
 

@@ -1,6 +1,7 @@
 import types
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -8,9 +9,32 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 import app.models
 from app.config import settings
 from app.database import Base, get_db
+from app.database import engine as app_engine
 from app.main import app
 from app.middleware.rate_limiter import limiter
 from app.redis import get_redis
+
+
+@pytest.fixture(autouse=True)
+def _mock_email():
+    """Prevent real emails from being sent during tests."""
+    with (
+        patch(
+            "app.services.email_service.aiosmtplib.send",
+            new_callable=AsyncMock,
+        ),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _clear_memory_cache():
+    """Clear the in-memory config cache between tests to prevent cross-contamination."""
+    from app.services.config_service import _memory_cache
+
+    _memory_cache.clear()
+    yield
+    _memory_cache.clear()
 
 
 @pytest_asyncio.fixture
@@ -62,12 +86,19 @@ async def fake_redis():
         # Return a positive TTL for existing keys, -2 for missing
         return 900 if key in store else -2
 
+    async def mock_mget(*keys):
+        # Handle both mget("a", "b") and mget(["a", "b"]) patterns
+        if len(keys) == 1 and isinstance(keys[0], (list, tuple)):
+            keys = keys[0]
+        return [store.get(key) for key in keys]
+
     redis = AsyncMock()
     redis.get = AsyncMock(side_effect=mock_get)
     redis.setex = AsyncMock(side_effect=mock_setex)
     redis.delete = AsyncMock(side_effect=mock_delete)
     redis.exists = AsyncMock(side_effect=mock_exists)
     redis.ttl = AsyncMock(side_effect=mock_ttl)
+    redis.mget = AsyncMock(side_effect=mock_mget)
     redis._store = store
     return redis
 
@@ -94,6 +125,7 @@ async def app_client(db_session, fake_redis):
         yield client
     app.dependency_overrides.clear()
     limiter.enabled = True
+    await app_engine.dispose()
 
 
 @pytest_asyncio.fixture

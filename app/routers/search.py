@@ -17,6 +17,7 @@ from app.schemas.search import (
     calculate_is_online,
 )
 from app.services.config_service import get_min_search_version
+from app.services.credit_service import get_balance
 from app.services.pairing_service import get_device_by_user_id
 from app.services.ping_service import check_app_version
 from app.services.search_service import get_search_status, set_search_active
@@ -31,8 +32,12 @@ async def start_search(
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Start search for the authenticated user. Requires a paired device."""
+    balance = await get_balance(current_user.id, db, redis)
+    if balance <= 0:
+        raise HTTPException(status_code=403, detail="INSUFFICIENT_CREDITS")
     if not current_user.email_verified:
         raise HTTPException(status_code=403, detail="EMAIL_NOT_VERIFIED")
     device = await get_device_by_user_id(db, current_user.id)
@@ -79,10 +84,13 @@ async def get_status(
             min_version = await get_min_search_version(db, redis)
             force_update = not check_app_version(device.app_version, min_version)
 
+    balance = await get_balance(current_user.id, db, redis)
+
     return SearchStatusResponse(
         is_active=status.is_active,
         is_online=is_online,
         last_ping_at=last_ping_at,
+        credits_balance=balance,
         force_update=force_update,
     )
 

@@ -2,10 +2,11 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.database import AsyncSessionLocal
 from app.models.accept_failure import AcceptFailure
+from app.models.credit_transaction import CreditTransaction
 from app.models.ride import Ride
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,23 @@ RETENTION_WEEKS = 8
 
 # Delete in batches to avoid long-running locks.
 BATCH_SIZE = 1000
+
+
+async def clear_ride_reference_ids(db, cutoff: datetime) -> int:
+    """Set reference_id to NULL in credit_transactions for rides about to be deleted.
+
+    Must be called before delete_old_rides to prevent orphaned references.
+    Uses a single UPDATE with subselect as per PRD specification.
+    Returns the number of cleared reference_ids.
+    """
+    stmt = (
+        update(CreditTransaction)
+        .where(CreditTransaction.reference_id.in_(select(Ride.id).where(Ride.created_at < cutoff)))
+        .values(reference_id=None)
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+    return result.rowcount  # type: ignore[no-any-return]
 
 
 async def delete_old_rides(db, cutoff: datetime) -> int:
@@ -81,12 +99,14 @@ async def cleanup_old_data() -> None:
         try:
             cutoff = datetime.now(UTC) - timedelta(weeks=RETENTION_WEEKS)
             async with AsyncSessionLocal() as db:
+                cleared_refs = await clear_ride_reference_ids(db, cutoff)
                 deleted_rides = await delete_old_rides(db, cutoff)
                 deleted_failures = await delete_old_accept_failures(db, cutoff)
 
-                if deleted_rides > 0 or deleted_failures > 0:
+                if cleared_refs > 0 or deleted_rides > 0 or deleted_failures > 0:
                     logger.info(
-                        "Data cleanup: deleted %d ride(s), %d accept failure(s)",
+                        "Data cleanup: cleared %d reference(s), deleted %d ride(s), %d accept failure(s)",
+                        cleared_refs,
                         deleted_rides,
                         deleted_failures,
                     )

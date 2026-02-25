@@ -1,7 +1,11 @@
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
+import pytest
 from sqlalchemy import select
 
+from app.models.credit_balance import CreditBalance
+from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.refresh_token import RefreshToken
 from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
@@ -114,3 +118,95 @@ async def test_register_refresh_token_stored_hashed(app_client, db_session):
 
     # Verify the plain token is NOT stored
     assert rt.token_hash != refresh_token
+
+
+# ---------------------------------------------------------------------------
+# Billing: CreditBalance created with registration bonus
+# ---------------------------------------------------------------------------
+
+
+async def test_register_creates_credit_balance_with_bonus(app_client, db_session):
+    """POST /auth/register creates CreditBalance with default bonus of 10 credits."""
+    response = await app_client.post(
+        REGISTER_URL,
+        json={"email": "credit-bal@example.com", "password": "securePass1"},
+    )
+
+    assert response.status_code == 201
+    user_id = UUID(response.json()["user_id"])
+
+    result = await db_session.execute(
+        select(CreditBalance).where(CreditBalance.user_id == user_id)
+    )
+    cb = result.scalar_one_or_none()
+    assert cb is not None
+    assert cb.balance == 10
+
+
+# ---------------------------------------------------------------------------
+# Billing: CreditTransaction REGISTRATION_BONUS created
+# ---------------------------------------------------------------------------
+
+
+async def test_register_creates_registration_bonus_transaction(app_client, db_session):
+    """POST /auth/register creates REGISTRATION_BONUS CreditTransaction with correct fields."""
+    response = await app_client.post(
+        REGISTER_URL,
+        json={"email": "bonus-tx@example.com", "password": "securePass1"},
+    )
+
+    assert response.status_code == 201
+    user_id = UUID(response.json()["user_id"])
+
+    result = await db_session.execute(
+        select(CreditTransaction).where(CreditTransaction.user_id == user_id)
+    )
+    tx = result.scalar_one_or_none()
+    assert tx is not None
+    assert tx.type == TransactionType.REGISTRATION_BONUS
+    assert tx.amount == 10
+    assert tx.balance_after == 10
+    assert tx.reference_id is None
+
+
+# ---------------------------------------------------------------------------
+# Billing: Atomicity — credit creation failure prevents user creation
+# ---------------------------------------------------------------------------
+
+
+async def test_register_fails_when_credit_creation_fails(app_client):
+    """Register fails when create_balance_with_bonus raises.
+
+    The register endpoint uses a single commit() for User + SearchFilters +
+    SearchStatus + CreditBalance + CreditTransaction. If create_balance_with_bonus
+    raises before commit(), the exception propagates and nothing is persisted.
+    """
+    with (
+        patch(
+            "app.routers.auth.create_balance_with_bonus",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Simulated credit creation failure"),
+        ),
+        pytest.raises(Exception, match="Simulated credit creation failure"),
+    ):
+        await app_client.post(
+            REGISTER_URL,
+            json={"email": "rollback@example.com", "password": "securePass1"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Billing: Response format unchanged (no billing fields leaked)
+# ---------------------------------------------------------------------------
+
+
+async def test_register_response_has_no_billing_fields(app_client):
+    """POST /auth/register response contains only auth fields, no billing data."""
+    response = await app_client.post(
+        REGISTER_URL,
+        json={"email": "format@example.com", "password": "securePass1"},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert set(data.keys()) == {"user_id", "access_token", "refresh_token"}

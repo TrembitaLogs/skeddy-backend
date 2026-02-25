@@ -1,8 +1,12 @@
 """ModelAdmin views for SQLAdmin panel."""
 
-from typing import ClassVar
+import json
+import logging
+from typing import Any, ClassVar
 
 from sqladmin import ModelView
+from starlette.requests import Request
+from wtforms import TextAreaField
 
 from app.models.accept_failure import AcceptFailure
 from app.models.app_config import AppConfig
@@ -13,9 +17,31 @@ from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
 from app.models.user import User
 
+logger = logging.getLogger(__name__)
+
+# AppConfig keys that store JSON and require Pydantic validation on save.
+_JSON_VALIDATORS: dict[str, type] = {}
+
+
+def _get_json_validators() -> dict[str, type]:
+    """Lazy-load Pydantic validators to avoid circular imports."""
+    if not _JSON_VALIDATORS:
+        from app.schemas.billing_config import (
+            CreditProductsConfig,
+            RideCreditTiersConfig,
+        )
+
+        _JSON_VALIDATORS.update(
+            {
+                "credit_products": CreditProductsConfig,
+                "ride_credit_tiers": RideCreditTiersConfig,
+            }
+        )
+    return _JSON_VALIDATORS
+
 
 class AppConfigAdmin(ModelView, model=AppConfig):
-    """Admin view for AppConfig model (read-only + edit)."""
+    """Admin view for AppConfig model with JSON validation."""
 
     name = "App Config"
     name_plural = "App Configs"
@@ -24,9 +50,47 @@ class AppConfigAdmin(ModelView, model=AppConfig):
     column_list: ClassVar = [AppConfig.key, AppConfig.value, AppConfig.updated_at]
     column_sortable_list: ClassVar = [AppConfig.key, AppConfig.updated_at]
 
+    # Use TextAreaField for 'value' so multiline JSON is easy to edit
+    form_overrides: ClassVar = {"value": TextAreaField}
+    form_widget_args: ClassVar = {
+        "value": {"rows": 6},
+    }
+
     can_create = True
     can_edit = True
     can_delete = False
+
+    async def on_model_change(
+        self, data: dict[str, Any], model: AppConfig, is_created: bool, request: Request
+    ) -> None:
+        """Validate JSON config values via Pydantic before saving."""
+        validators = _get_json_validators()
+        schema_cls = validators.get(model.key)
+        if schema_cls is None:
+            return
+
+        raw_value = model.value
+        try:
+            parsed = json.loads(raw_value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"Invalid JSON for '{model.key}': {exc}") from exc
+
+        try:
+            schema_cls.model_validate(parsed)  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise ValueError(f"Validation failed for '{model.key}': {exc}") from exc
+
+    async def after_model_change(
+        self, data: dict[str, Any], model: AppConfig, is_created: bool, request: Request
+    ) -> None:
+        """Invalidate Redis and in-memory cache after config create/update."""
+        from app.redis import redis_client
+        from app.services.config_service import invalidate_config
+
+        try:
+            await invalidate_config(model.key, redis_client)
+        except Exception:
+            logger.warning("Cache invalidation failed for key %s", model.key, exc_info=True)
 
 
 class UserAdmin(ModelView, model=User):

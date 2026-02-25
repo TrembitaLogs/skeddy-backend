@@ -3,10 +3,13 @@
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import and_, cast, func, select
+from sqlalchemy.types import Date
 
 from app.admin.dashboard import DashboardView
+from app.models.credit_balance import CreditBalance
 from app.models.paired_device import PairedDevice
+from app.models.purchase_order import PurchaseOrder, PurchaseStatus
 from app.models.ride import Ride
 from app.models.search_status import SearchStatus
 from app.models.user import User
@@ -71,6 +74,7 @@ class TestDashboardViewStatistics:
             idempotency_key="ride_recent",
             event_type="requested",
             ride_data={"price": 10.0},
+            ride_hash="a" * 64,
             created_at=datetime.utcnow() - timedelta(hours=1),  # Last 24h
         )
         ride_old = Ride(
@@ -78,6 +82,7 @@ class TestDashboardViewStatistics:
             idempotency_key="ride_old",
             event_type="requested",
             ride_data={"price": 15.0},
+            ride_hash="b" * 64,
             created_at=datetime.utcnow() - timedelta(days=5),  # Last 7d
         )
         db_session.add(ride_recent)
@@ -221,3 +226,204 @@ class TestAdminPanelModelViews:
         resp = await app_client.get(path)
         # Should require authentication (redirect to login or show login form)
         assert resp.status_code in (200, 302, 303)
+
+
+class TestDashboardBillingWidgets:
+    """Tests for billing-related dashboard widgets (Total Credits, Purchases Today)."""
+
+    @pytest.mark.asyncio
+    async def test_total_credits_shows_correct_sum(self, db_session, fake_redis, app_client):
+        """Widget 'Total Credits' shows correct sum of all user balances."""
+        user1 = User(email="credits1@example.com", password_hash="hash1")
+        user2 = User(email="credits2@example.com", password_hash="hash2")
+        user3 = User(email="credits3@example.com", password_hash="hash3")
+        db_session.add_all([user1, user2, user3])
+        await db_session.flush()
+
+        db_session.add_all(
+            [
+                CreditBalance(user_id=user1.id, balance=50),
+                CreditBalance(user_id=user2.id, balance=120),
+                CreditBalance(user_id=user3.id, balance=0),
+            ]
+        )
+        await db_session.commit()
+
+        total = await db_session.scalar(select(func.coalesce(func.sum(CreditBalance.balance), 0)))
+        assert total == 170
+
+    @pytest.mark.asyncio
+    async def test_total_credits_zero_when_empty(self, db_session, fake_redis, app_client):
+        """Widget 'Total Credits' returns 0 when credit_balances table is empty."""
+        total = await db_session.scalar(select(func.coalesce(func.sum(CreditBalance.balance), 0)))
+        assert total == 0
+
+    @pytest.mark.asyncio
+    async def test_purchases_today_shows_count_and_sum(self, db_session, fake_redis, app_client):
+        """Widget 'Purchases Today' shows count and credit sum of today's VERIFIED orders."""
+        user = User(email="buyer@example.com", password_hash="hash1")
+        db_session.add(user)
+        await db_session.flush()
+
+        # Two VERIFIED purchases today
+        db_session.add_all(
+            [
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_10",
+                    purchase_token="token_today_1",
+                    credits_amount=10,
+                    status=PurchaseStatus.VERIFIED.value,
+                    created_at=datetime.utcnow(),
+                ),
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_50",
+                    purchase_token="token_today_2",
+                    credits_amount=50,
+                    status=PurchaseStatus.VERIFIED.value,
+                    created_at=datetime.utcnow(),
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(
+                func.count(PurchaseOrder.id),
+                func.coalesce(func.sum(PurchaseOrder.credits_amount), 0),
+            ).where(
+                and_(
+                    PurchaseOrder.status == PurchaseStatus.VERIFIED.value,
+                    cast(PurchaseOrder.created_at, Date) == func.current_date(),
+                )
+            )
+        )
+        row = result.one()
+        assert row[0] == 2
+        assert row[1] == 60
+
+    @pytest.mark.asyncio
+    async def test_purchases_today_excludes_non_verified(self, db_session, fake_redis, app_client):
+        """Widget 'Purchases Today' does not include PENDING or FAILED orders."""
+        user = User(email="buyer2@example.com", password_hash="hash2")
+        db_session.add(user)
+        await db_session.flush()
+
+        db_session.add_all(
+            [
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_10",
+                    purchase_token="token_pending",
+                    credits_amount=10,
+                    status=PurchaseStatus.PENDING.value,
+                    created_at=datetime.utcnow(),
+                ),
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_25",
+                    purchase_token="token_failed",
+                    credits_amount=25,
+                    status=PurchaseStatus.FAILED.value,
+                    created_at=datetime.utcnow(),
+                ),
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_50",
+                    purchase_token="token_consumed",
+                    credits_amount=50,
+                    status=PurchaseStatus.CONSUMED.value,
+                    created_at=datetime.utcnow(),
+                ),
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_100",
+                    purchase_token="token_verified",
+                    credits_amount=100,
+                    status=PurchaseStatus.VERIFIED.value,
+                    created_at=datetime.utcnow(),
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(
+                func.count(PurchaseOrder.id),
+                func.coalesce(func.sum(PurchaseOrder.credits_amount), 0),
+            ).where(
+                and_(
+                    PurchaseOrder.status == PurchaseStatus.VERIFIED.value,
+                    cast(PurchaseOrder.created_at, Date) == func.current_date(),
+                )
+            )
+        )
+        row = result.one()
+        assert row[0] == 1  # Only the VERIFIED one
+        assert row[1] == 100
+
+    @pytest.mark.asyncio
+    async def test_purchases_today_zero_when_no_purchases(
+        self, db_session, fake_redis, app_client
+    ):
+        """Widget 'Purchases Today' returns 0 count and 0 credits when no purchases today."""
+        result = await db_session.execute(
+            select(
+                func.count(PurchaseOrder.id),
+                func.coalesce(func.sum(PurchaseOrder.credits_amount), 0),
+            ).where(
+                and_(
+                    PurchaseOrder.status == PurchaseStatus.VERIFIED.value,
+                    cast(PurchaseOrder.created_at, Date) == func.current_date(),
+                )
+            )
+        )
+        row = result.one()
+        assert row[0] == 0
+        assert row[1] == 0
+
+    @pytest.mark.asyncio
+    async def test_purchases_today_excludes_yesterday(self, db_session, fake_redis, app_client):
+        """Widget 'Purchases Today' does not include yesterday's VERIFIED orders."""
+        user = User(email="buyer3@example.com", password_hash="hash3")
+        db_session.add(user)
+        await db_session.flush()
+
+        db_session.add_all(
+            [
+                PurchaseOrder(
+                    user_id=user.id,
+                    product_id="credits_50",
+                    purchase_token="token_yesterday",
+                    credits_amount=50,
+                    status=PurchaseStatus.VERIFIED.value,
+                    created_at=datetime.utcnow() - timedelta(days=1),
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(
+                func.count(PurchaseOrder.id),
+                func.coalesce(func.sum(PurchaseOrder.credits_amount), 0),
+            ).where(
+                and_(
+                    PurchaseOrder.status == PurchaseStatus.VERIFIED.value,
+                    cast(PurchaseOrder.created_at, Date) == func.current_date(),
+                )
+            )
+        )
+        row = result.one()
+        assert row[0] == 0
+        assert row[1] == 0
+
+    @pytest.mark.asyncio
+    async def test_dashboard_renders_billing_widgets(self, admin_client):
+        """Dashboard page contains billing widget content after login."""
+        resp = await admin_client.client.get("/admin/dashboard")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Total Credits in Circulation" in body
+        assert "Purchases Today" in body

@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
@@ -66,6 +66,8 @@ def _ride_body(**overrides) -> dict:
     body = {
         "idempotency_key": "550e8400-e29b-41d4-a716-446655440000",
         "event_type": "ACCEPTED",
+        "ride_hash": "a" * 64,
+        "timezone": "America/New_York",
         "ride_data": {
             "price": 25.50,
             "pickup_time": "Tomorrow \u00b7 6:05AM",
@@ -320,6 +322,8 @@ async def test_create_ride_data_saved_correctly(app_client, db_session):
             json={
                 "idempotency_key": "11112222-3333-4444-5555-666677778888",
                 "event_type": "ACCEPTED",
+                "ride_hash": "a" * 64,
+                "timezone": "America/New_York",
                 "ride_data": ride_data,
             },
             headers=_device_headers(pairing["device_token"], "ride7-dev"),
@@ -399,12 +403,12 @@ async def _create_rides_for_user(app_client, device_token, device_id, count):
 
 
 # ---------------------------------------------------------------------------
-# Test 9: GET /rides/events without params → first page with defaults
+# Test 9: GET /rides/events first page without cursor
 # ---------------------------------------------------------------------------
 
 
-async def test_get_ride_events_default_params(app_client, db_session):
-    """GET /rides/events without params -> returns events with default limit=50, offset=0."""
+async def test_get_ride_events_first_page_no_cursor(app_client, db_session):
+    """GET /rides/events without cursor -> first page with default limit=20."""
     reg = await _register(app_client, email="events1@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="ev1-dev")
 
@@ -414,85 +418,99 @@ async def test_get_ride_events_default_params(app_client, db_session):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] == 3
-    assert data["limit"] == 50
-    assert data["offset"] == 0
-    assert len(data["events"]) == 3
+    assert "events" in data
+    assert "has_more" in data
+    assert "next_cursor" in data
+    # 3 rides + 1 REGISTRATION_BONUS from register
+    assert len(data["events"]) == 4
+    assert data["has_more"] is False
+    assert data["next_cursor"] is None
 
-    # Verify events are ordered by created_at descending (newest first)
-    for event in data["events"]:
+    # Verify ride events have correct structure
+    ride_events = [e for e in data["events"] if e["event_kind"] == "ride"]
+    for event in ride_events:
         assert "id" in event
         assert event["event_type"] == "ACCEPTED"
         assert "ride_data" in event
         assert "created_at" in event
+        assert "credits_charged" in event
+        assert "credits_refunded" in event
+        assert "verification_status" in event
 
 
 # ---------------------------------------------------------------------------
-# Test 10: GET /rides/events with offset → next page
+# Test 10: GET /rides/events with cursor → next page
 # ---------------------------------------------------------------------------
 
 
-async def test_get_ride_events_with_offset(app_client, db_session):
-    """GET /rides/events with limit and offset -> correct pagination."""
+async def test_get_ride_events_with_cursor(app_client, db_session):
+    """GET /rides/events with cursor -> returns next page, no overlap."""
     reg = await _register(app_client, email="events2@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="ev2-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev2-dev", count=5)
 
-    # First page: limit=2, offset=0
+    # First page: limit=2
     resp1 = await app_client.get(
         RIDES_EVENTS_URL,
-        params={"limit": 2, "offset": 0},
+        params={"limit": 2},
         headers=_jwt(reg["access_token"]),
     )
     assert resp1.status_code == 200
     data1 = resp1.json()
-    assert data1["total"] == 5
-    assert data1["limit"] == 2
-    assert data1["offset"] == 0
     assert len(data1["events"]) == 2
+    assert data1["has_more"] is True
+    assert data1["next_cursor"] is not None
 
-    # Second page: limit=2, offset=2
+    # Second page via cursor
     resp2 = await app_client.get(
         RIDES_EVENTS_URL,
-        params={"limit": 2, "offset": 2},
+        params={"limit": 2, "cursor": data1["next_cursor"]},
         headers=_jwt(reg["access_token"]),
     )
     assert resp2.status_code == 200
     data2 = resp2.json()
-    assert data2["total"] == 5
-    assert data2["limit"] == 2
-    assert data2["offset"] == 2
     assert len(data2["events"]) == 2
+    assert data2["has_more"] is True
 
-    # Pages should have different events
+    # No overlap between pages
     page1_ids = {e["id"] for e in data1["events"]}
     page2_ids = {e["id"] for e in data2["events"]}
     assert page1_ids.isdisjoint(page2_ids)
 
 
 # ---------------------------------------------------------------------------
-# Test 11: GET /rides/events last page → fewer events than limit
+# Test 11: GET /rides/events last page → has_more=false, next_cursor=null
 # ---------------------------------------------------------------------------
 
 
 async def test_get_ride_events_last_page(app_client, db_session):
-    """GET /rides/events on last page -> returns remaining events, total unchanged."""
+    """GET /rides/events on last page -> has_more=false, next_cursor=null."""
     reg = await _register(app_client, email="events3@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="ev3-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev3-dev", count=3)
 
-    # Offset=2, limit=5 -> should return only 1 event (3 total, skip 2)
-    resp = await app_client.get(
+    # 3 rides + 1 REGISTRATION_BONUS = 4 events total
+    # First page: limit=2
+    resp1 = await app_client.get(
         RIDES_EVENTS_URL,
-        params={"limit": 5, "offset": 2},
+        params={"limit": 2},
         headers=_jwt(reg["access_token"]),
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 3
-    assert len(data["events"]) == 1
+    data1 = resp1.json()
+    assert data1["has_more"] is True
+
+    # Second page: limit=2
+    resp2 = await app_client.get(
+        RIDES_EVENTS_URL,
+        params={"limit": 2, "cursor": data1["next_cursor"]},
+        headers=_jwt(reg["access_token"]),
+    )
+    data2 = resp2.json()
+    assert len(data2["events"]) == 2
+    assert data2["has_more"] is False
+    assert data2["next_cursor"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +536,7 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
     reg = await _register(app_client, email="since@example.com")
     user_id = UUID(reg["user_id"])
 
-    base_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    base_time = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
     for i in range(3):
         ride = Ride(
             user_id=user_id,
@@ -530,13 +548,16 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
                 "pickup_location": f"Start {i}",
                 "dropoff_location": f"End {i}",
             },
-            created_at=base_time + timedelta(weeks=i * 4),
+            ride_hash="a" * 64,
+            created_at=base_time + timedelta(days=i * 7),
         )
         db_session.add(ride)
     await db_session.flush()
 
-    # Filter: only events from 3 weeks after base (should exclude first ride)
-    since = (base_time + timedelta(weeks=3)).isoformat()
+    # Filter: only events from 5 days after base (should exclude first ride)
+    # Rides: Feb 1 (excluded), Feb 8, Feb 15
+    # REGISTRATION_BONUS: created at now (Feb 25) - after since, included
+    since = (base_time + timedelta(days=5)).isoformat()
     resp = await app_client.get(
         RIDES_EVENTS_URL,
         params={"since": since},
@@ -545,21 +566,26 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] == 2
-    assert len(data["events"]) == 2
+    # 2 rides after since + REGISTRATION_BONUS (created at registration time)
+    assert len(data["events"]) == 3
+    ride_events = [e for e in data["events"] if e["event_kind"] == "ride"]
+    assert len(ride_events) == 2
+    assert data["has_more"] is False
 
 
-async def test_get_ride_events_no_rides_returns_empty(app_client, db_session):
-    """GET /rides/events for user with no rides -> empty events, total=0."""
+async def test_get_ride_events_no_events_returns_empty(app_client, db_session):
+    """GET /rides/events for fresh user -> only REGISTRATION_BONUS credit event."""
     reg = await _register(app_client, email="events5@example.com")
 
     resp = await app_client.get(RIDES_EVENTS_URL, headers=_jwt(reg["access_token"]))
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] == 0
-    assert data["limit"] == 50
-    assert data["offset"] == 0
-    assert data["events"] == []
+    # Registration creates a REGISTRATION_BONUS credit transaction
+    assert len(data["events"]) == 1
+    assert data["events"][0]["event_kind"] == "credit"
+    assert data["events"][0]["credit_type"] == "REGISTRATION_BONUS"
+    assert data["has_more"] is False
+    assert data["next_cursor"] is None
 
 
 # ===========================================================================
@@ -682,12 +708,12 @@ async def test_create_ride_fcm_payload_values_all_strings(app_client):
 
 
 # ---------------------------------------------------------------------------
-# Test 17: RideEventsListResponse serializes correctly
+# Test 17: EventsListResponse serializes correctly (cursor-based)
 # ---------------------------------------------------------------------------
 
 
-async def test_ride_events_list_response_serialization(app_client, db_session):
-    """GET /rides/events -> response has correct structure with all fields."""
+async def test_events_list_response_serialization(app_client, db_session):
+    """GET /rides/events -> response has correct cursor-based structure."""
     reg = await _register(app_client, email="serial@example.com")
     pairing = await _pair_device(app_client, reg["access_token"], device_id="serial-dev")
 
@@ -697,23 +723,37 @@ async def test_ride_events_list_response_serialization(app_client, db_session):
     assert resp.status_code == 200
     data = resp.json()
 
-    # Verify top-level response structure
+    # Verify top-level response structure (cursor-based)
     assert "events" in data
-    assert "total" in data
-    assert "limit" in data
-    assert "offset" in data
+    assert "has_more" in data
+    assert "next_cursor" in data
     assert isinstance(data["events"], list)
-    assert isinstance(data["total"], int)
-    assert isinstance(data["limit"], int)
-    assert isinstance(data["offset"], int)
+    assert isinstance(data["has_more"], bool)
+    # Legacy fields must NOT be present
+    assert "total" not in data
+    assert "offset" not in data
 
-    # Verify each event has correct fields
-    for event in data["events"]:
+    # Verify ride events have correct fields including billing
+    ride_events = [e for e in data["events"] if e["event_kind"] == "ride"]
+    assert len(ride_events) == 2
+    for event in ride_events:
         assert "id" in event
+        assert event["event_kind"] == "ride"
         assert "event_type" in event
         assert "ride_data" in event
         assert "created_at" in event
+        assert "credits_charged" in event
+        assert "credits_refunded" in event
+        assert "verification_status" in event
         assert isinstance(event["ride_data"], dict)
+
+    # Verify credit events (REGISTRATION_BONUS from register)
+    credit_events = [e for e in data["events"] if e["event_kind"] == "credit"]
+    assert len(credit_events) == 1
+    ce = credit_events[0]
+    assert ce["credit_type"] == "REGISTRATION_BONUS"
+    assert "amount" in ce
+    assert "balance_after" in ce
 
 
 # ===========================================================================
@@ -737,6 +777,8 @@ async def test_create_ride_invalid_ride_data_missing_price_returns_422(app_clien
         json={
             "idempotency_key": str(uuid4()),
             "event_type": "ACCEPTED",
+            "ride_hash": "a" * 64,
+            "timezone": "America/New_York",
             "ride_data": {
                 "pickup_time": "Today · 3:00PM",
                 "pickup_location": "Main St",
@@ -760,6 +802,8 @@ async def test_create_ride_invalid_ride_data_missing_pickup_location_returns_422
         json={
             "idempotency_key": str(uuid4()),
             "event_type": "ACCEPTED",
+            "ride_hash": "a" * 64,
+            "timezone": "America/New_York",
             "ride_data": {
                 "price": 25.0,
                 "pickup_time": "Today · 3:00PM",
@@ -800,16 +844,30 @@ async def test_get_ride_events_limit_over_100_returns_422(app_client):
     assert resp.status_code == 422
 
 
-async def test_get_ride_events_negative_offset_returns_422(app_client):
-    """GET /rides/events with offset=-1 -> 422 (ge=0 constraint)."""
-    reg = await _register(app_client, email="offneg@example.com")
+async def test_get_ride_events_invalid_cursor_returns_400(app_client):
+    """GET /rides/events with malformed cursor -> 400."""
+    reg = await _register(app_client, email="badcur@example.com")
 
     resp = await app_client.get(
         RIDES_EVENTS_URL,
-        params={"offset": -1},
+        params={"cursor": "not-a-valid-cursor"},
         headers=_jwt(reg["access_token"]),
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+async def test_get_ride_events_invalid_since_returns_400(app_client):
+    """GET /rides/events with malformed since -> 400."""
+    reg = await _register(app_client, email="badsince@example.com")
+
+    resp = await app_client.get(
+        RIDES_EVENTS_URL,
+        params={"since": "not-a-date"},
+        headers=_jwt(reg["access_token"]),
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_SINCE"
 
 
 # ---------------------------------------------------------------------------
@@ -825,7 +883,7 @@ async def test_get_ride_events_ordered_newest_first(app_client, db_session):
     user_id = UUID(reg["user_id"])
 
     # Insert rides directly with explicit timestamps to guarantee ordering
-    base_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    base_time = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
     for i in range(3):
         ride = Ride(
             user_id=user_id,
@@ -837,6 +895,7 @@ async def test_get_ride_events_ordered_newest_first(app_client, db_session):
                 "pickup_location": f"Start {i}",
                 "dropoff_location": f"End {i}",
             },
+            ride_hash="a" * 64,
             created_at=base_time + timedelta(hours=i),
         )
         db_session.add(ride)
@@ -845,12 +904,17 @@ async def test_get_ride_events_ordered_newest_first(app_client, db_session):
     resp = await app_client.get(RIDES_EVENTS_URL, headers=_jwt(reg["access_token"]))
     assert resp.status_code == 200
     events = resp.json()["events"]
-    assert len(events) == 3
 
-    # Newest first: price 12.0 (2h later) → 11.0 (1h later) → 10.0 (base)
-    assert events[0]["ride_data"]["price"] == 12.0
-    assert events[1]["ride_data"]["price"] == 11.0
-    assert events[2]["ride_data"]["price"] == 10.0
+    # 3 rides + REGISTRATION_BONUS; all sorted by created_at DESC
+    timestamps = [e["created_at"] for e in events]
+    assert timestamps == sorted(timestamps, reverse=True)
+
+    # Ride events should be newest first
+    ride_events = [e for e in events if e["event_kind"] == "ride"]
+    assert len(ride_events) == 3
+    assert ride_events[0]["ride_data"]["price"] == 12.0
+    assert ride_events[1]["ride_data"]["price"] == 11.0
+    assert ride_events[2]["ride_data"]["price"] == 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -868,20 +932,121 @@ async def test_get_ride_events_user_isolation(app_client, db_session):
     # User B with no rides
     reg_b = await _register(app_client, email="iso-b@example.com")
 
-    # User B should see 0 events
+    # User B should see only own REGISTRATION_BONUS
     resp_b = await app_client.get(RIDES_EVENTS_URL, headers=_jwt(reg_b["access_token"]))
     assert resp_b.status_code == 200
-    assert resp_b.json()["total"] == 0
-    assert resp_b.json()["events"] == []
+    b_events = resp_b.json()["events"]
+    assert len(b_events) == 1
+    assert b_events[0]["event_kind"] == "credit"
 
-    # User A should see 3 events
+    # User A should see 3 rides + own REGISTRATION_BONUS = 4 events
     resp_a = await app_client.get(RIDES_EVENTS_URL, headers=_jwt(reg_a["access_token"]))
     assert resp_a.status_code == 200
-    assert resp_a.json()["total"] == 3
+    assert len(resp_a.json()["events"]) == 4
 
 
 # ---------------------------------------------------------------------------
-# Test 22: POST /rides race condition — IntegrityError fallback path
+# Test 22: GET /rides/events — full cursor pagination through entire dataset
+# ---------------------------------------------------------------------------
+
+
+async def test_get_ride_events_paginate_entire_dataset(app_client, db_session):
+    """Paginating through entire dataset via cursor covers all events without overlap."""
+    reg = await _register(app_client, email="fullpag@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="fullpag-dev")
+
+    await _create_rides_for_user(app_client, pairing["device_token"], "fullpag-dev", count=5)
+
+    # 5 rides + 1 REGISTRATION_BONUS = 6 events total; paginate with limit=2
+    all_ids: list[str] = []
+    cursor = None
+    pages = 0
+
+    while True:
+        params: dict = {"limit": 2}
+        if cursor:
+            params["cursor"] = cursor
+        resp = await app_client.get(
+            RIDES_EVENTS_URL,
+            params=params,
+            headers=_jwt(reg["access_token"]),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        all_ids.extend(e["id"] for e in data["events"])
+        pages += 1
+
+        if not data["has_more"]:
+            assert data["next_cursor"] is None
+            break
+        cursor = data["next_cursor"]
+
+    # All 6 unique events collected across 3 pages
+    assert pages == 3
+    assert len(all_ids) == 6
+    assert len(set(all_ids)) == 6  # no duplicates
+
+
+# ---------------------------------------------------------------------------
+# Test 23: GET /rides/events — since + cursor combination
+# ---------------------------------------------------------------------------
+
+
+async def test_get_ride_events_since_plus_cursor(app_client, db_session):
+    """since and cursor parameters work correctly together."""
+    from datetime import datetime, timedelta
+
+    reg = await _register(app_client, email="sincecur@example.com")
+    user_id = UUID(reg["user_id"])
+
+    base_time = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
+    for i in range(4):
+        ride = Ride(
+            user_id=user_id,
+            idempotency_key=str(uuid4()),
+            event_type="ACCEPTED",
+            ride_data={
+                "price": 20.0 + i,
+                "pickup_time": f"Trip {i}",
+                "pickup_location": f"Start {i}",
+                "dropoff_location": f"End {i}",
+            },
+            ride_hash="a" * 64,
+            created_at=base_time + timedelta(hours=i),
+        )
+        db_session.add(ride)
+    await db_session.flush()
+
+    # since excludes rides at +0h and +1h; keeps +2h and +3h rides
+    # REGISTRATION_BONUS (created at "now" ~Feb 25) is also after since
+    since = (base_time + timedelta(hours=1, minutes=30)).isoformat()
+
+    # Collect all events via cursor pagination with limit=2
+    all_ids: list[str] = []
+    cursor = None
+    while True:
+        params: dict = {"limit": 2, "since": since}
+        if cursor:
+            params["cursor"] = cursor
+        resp = await app_client.get(
+            RIDES_EVENTS_URL,
+            params=params,
+            headers=_jwt(reg["access_token"]),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        all_ids.extend(e["id"] for e in data["events"])
+        if not data["has_more"]:
+            break
+        cursor = data["next_cursor"]
+
+    # 2 rides after since + 1 REGISTRATION_BONUS = 3 events total
+    assert len(all_ids) == 3
+    assert len(set(all_ids)) == 3  # no duplicates
+
+
+# ---------------------------------------------------------------------------
+# Test 24: POST /rides race condition — IntegrityError fallback path
 # ---------------------------------------------------------------------------
 
 
@@ -947,3 +1112,767 @@ async def test_create_ride_missing_device_headers_returns_422(app_client):
     """POST /rides without X-Device-Token/X-Device-Id headers -> 422."""
     resp = await app_client.post(RIDES_URL, json=_ride_body())
     assert resp.status_code == 422
+
+
+# ===========================================================================
+# Task 5.1: ride_hash and timezone validation tests
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Test 24: ride_hash too short (63 chars) → 422
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_ride_hash_too_short_returns_422(app_client):
+    """POST /rides with ride_hash of 63 chars -> 422."""
+    reg = await _register(app_client, email="hash-short@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-short-dev")
+
+    resp = await app_client.post(
+        RIDES_URL,
+        json=_ride_body(
+            idempotency_key=str(uuid4()),
+            ride_hash="a" * 63,
+        ),
+        headers=_device_headers(pairing["device_token"], "hash-short-dev"),
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Test 25: ride_hash with non-hex chars → 422
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_ride_hash_non_hex_returns_422(app_client):
+    """POST /rides with ride_hash containing non-hex characters -> 422."""
+    reg = await _register(app_client, email="hash-nonhex@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-nonhex-dev")
+
+    resp = await app_client.post(
+        RIDES_URL,
+        json=_ride_body(
+            idempotency_key=str(uuid4()),
+            ride_hash="g" * 64,
+        ),
+        headers=_device_headers(pairing["device_token"], "hash-nonhex-dev"),
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Test 26: ride_hash uppercase accepted and lowercased
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_ride_hash_uppercase_accepted(app_client, db_session):
+    """POST /rides with uppercase ride_hash -> accepted, stored lowercase."""
+    reg = await _register(app_client, email="hash-upper@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-upper-dev")
+
+    uppercase_hash = "A" * 64
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                ride_hash=uppercase_hash,
+            ),
+            headers=_device_headers(pairing["device_token"], "hash-upper-dev"),
+        )
+
+    assert resp.status_code == 201
+
+    ride_id = UUID(resp.json()["ride_id"])
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    assert ride.ride_hash == "a" * 64
+
+
+# ---------------------------------------------------------------------------
+# Test 27: valid timezone accepted
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_valid_timezone_accepted(app_client):
+    """POST /rides with valid IANA timezone -> accepted."""
+    reg = await _register(app_client, email="tz-valid@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-valid-dev")
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                timezone="Europe/Kyiv",
+            ),
+            headers=_device_headers(pairing["device_token"], "tz-valid-dev"),
+        )
+
+    assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# Test 28: invalid timezone NOT rejected (graceful fallback in business logic)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_invalid_timezone_not_rejected(app_client):
+    """POST /rides with invalid timezone -> NOT rejected at schema level.
+
+    Per PRD section 6: invalid timezone should fallback to UTC in business
+    logic (task 5.2), not cause a 422 validation error.
+    """
+    reg = await _register(app_client, email="tz-invalid@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-invalid-dev")
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                timezone="Invalid/Zone",
+            ),
+            headers=_device_headers(pairing["device_token"], "tz-invalid-dev"),
+        )
+
+    assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# Test 29: missing timezone → 422
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_missing_timezone_returns_422(app_client):
+    """POST /rides without timezone field -> 422."""
+    reg = await _register(app_client, email="tz-missing@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-missing-dev")
+
+    body = _ride_body(idempotency_key=str(uuid4()))
+    del body["timezone"]
+
+    resp = await app_client.post(
+        RIDES_URL,
+        json=body,
+        headers=_device_headers(pairing["device_token"], "tz-missing-dev"),
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Test 30: missing ride_hash → 422
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_missing_ride_hash_returns_422(app_client):
+    """POST /rides without ride_hash field -> 422."""
+    reg = await _register(app_client, email="hash-missing@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-missing-dev")
+
+    body = _ride_body(idempotency_key=str(uuid4()))
+    del body["ride_hash"]
+
+    resp = await app_client.post(
+        RIDES_URL,
+        json=body,
+        headers=_device_headers(pairing["device_token"], "hash-missing-dev"),
+    )
+    assert resp.status_code == 422
+
+
+# ===========================================================================
+# Task 5.2: verification_deadline and pickup_time parsing integration tests
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Test 31: Ride saved with verification_status='PENDING' and verification_deadline set
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_sets_verification_status_pending(app_client, db_session):
+    """POST /rides -> ride saved with verification_status='PENDING' and verification_deadline."""
+    reg = await _register(app_client, email="vf-pending@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="vf-pending-dev")
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(idempotency_key=str(uuid4())),
+            headers=_device_headers(pairing["device_token"], "vf-pending-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    assert ride.verification_status == "PENDING"
+    assert ride.verification_deadline is not None
+    assert ride.ride_hash == "a" * 64
+
+
+# ---------------------------------------------------------------------------
+# Test 32: verification_deadline is in the future (pickup_time - N min)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_verification_deadline_before_pickup(app_client, db_session):
+    """POST /rides with future pickup_time -> deadline = pickup_time - N minutes."""
+    reg = await _register(app_client, email="vf-future@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="vf-future-dev")
+
+    # Use a pickup_time far in the future so deadline is definitely in the future
+    body = _ride_body(idempotency_key=str(uuid4()))
+    body["ride_data"]["pickup_time"] = "Tomorrow \u00b7 6:05AM"
+    body["timezone"] = "America/New_York"
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=body,
+            headers=_device_headers(pairing["device_token"], "vf-future-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    # Deadline should be set and be a timezone-aware datetime
+    assert ride.verification_deadline is not None
+    assert (
+        ride.verification_deadline.tzinfo is not None
+        or ride.verification_deadline.utcoffset() is not None
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 33: Invalid timezone fallback logs RIDE_TIMEZONE_FALLBACK with ride_id
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_invalid_timezone_logs_fallback_warning(app_client, caplog):
+    """POST /rides with invalid timezone -> logs RIDE_TIMEZONE_FALLBACK with ride_id."""
+    reg = await _register(app_client, email="tz-log@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-log-dev")
+
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        caplog.at_level(logging.WARNING, logger="app.routers.rides"),
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                timezone="Bogus/Timezone",
+            ),
+            headers=_device_headers(pairing["device_token"], "tz-log-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = resp.json()["ride_id"]
+
+    fallback_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "RIDE_TIMEZONE_FALLBACK" in r.message
+    ]
+    assert len(fallback_records) == 1
+    assert ride_id in fallback_records[0].message
+    assert "Bogus/Timezone" in fallback_records[0].message
+
+
+# ---------------------------------------------------------------------------
+# Test 34: Unparseable pickup_time -> deadline still set (falls back to now)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_unparseable_pickup_time_sets_deadline(app_client, db_session, caplog):
+    """POST /rides with unparseable pickup_time -> deadline set to ~now, warning logged."""
+    reg = await _register(app_client, email="parse-fail@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="parse-fail-dev")
+
+    body = _ride_body(idempotency_key=str(uuid4()))
+    body["ride_data"]["pickup_time"] = "some random garbage text"
+
+    before = datetime.now(UTC)
+
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        caplog.at_level(logging.WARNING, logger="app.routers.rides"),
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=body,
+            headers=_device_headers(pairing["device_token"], "parse-fail-dev"),
+        )
+
+    after = datetime.now(UTC)
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    # Deadline should be set to approximately now (within test execution window)
+    assert ride.verification_deadline is not None
+    deadline_naive = (
+        ride.verification_deadline.replace(tzinfo=UTC)
+        if ride.verification_deadline.tzinfo is None
+        else ride.verification_deadline
+    )
+    assert before <= deadline_naive <= after
+
+    # Should log parse failure warning
+    parse_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "RIDE_PICKUP_PARSE_FAILED" in r.message
+    ]
+    assert len(parse_records) == 1
+
+
+# ===========================================================================
+# Task 5.4: Credit charging integration tests
+# ===========================================================================
+
+
+async def _set_user_balance(db_session, user_id, balance):
+    """Directly set a user's credit balance for test setup."""
+    from app.models.credit_balance import CreditBalance
+
+    result = await db_session.execute(
+        select(CreditBalance).where(CreditBalance.user_id == UUID(user_id))
+    )
+    cb = result.scalar_one()
+    cb.balance = balance
+    await db_session.flush()
+
+
+# ---------------------------------------------------------------------------
+# Test 35: Happy path — ride $25.50 (tier 2) with 10 credits → charged=2
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_charges_credits_happy_path(app_client, db_session):
+    """POST /rides with sufficient balance -> credits_charged=2, CreditTransaction created."""
+    from app.models.credit_balance import CreditBalance
+    from app.models.credit_transaction import CreditTransaction
+
+    reg = await _register(app_client, email="charge-happy@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="charge-happy-dev")
+    user_id = UUID(reg["user_id"])
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                ride_data={
+                    "price": 45.00,
+                    "pickup_time": "Tomorrow · 6:05AM",
+                    "pickup_location": "Start St",
+                    "dropoff_location": "End Ave",
+                },
+            ),
+            headers=_device_headers(pairing["device_token"], "charge-happy-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    # Verify ride.credits_charged saved in DB
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    assert ride.credits_charged == 2  # $45 falls in tier $20-$50 → 2 credits
+
+    # Verify CreditBalance updated (10 - 2 = 8)
+    result = await db_session.execute(
+        select(CreditBalance.balance).where(CreditBalance.user_id == user_id)
+    )
+    assert result.scalar_one() == 8
+
+    # Verify CreditTransaction RIDE_CHARGE created
+    result = await db_session.execute(
+        select(CreditTransaction).where(
+            CreditTransaction.user_id == user_id,
+            CreditTransaction.type == "RIDE_CHARGE",
+        )
+    )
+    tx = result.scalar_one()
+    assert tx.amount == -2
+    assert tx.balance_after == 8
+    assert tx.reference_id == ride_id
+
+
+# ---------------------------------------------------------------------------
+# Test 36: Partial charge — balance=1, cost=3 → credits_charged=1
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_partial_charge(app_client, db_session):
+    """POST /rides with balance < cost -> partial charge, ride still saved."""
+    from app.models.credit_balance import CreditBalance
+    from app.models.credit_transaction import CreditTransaction
+
+    reg = await _register(app_client, email="charge-partial@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="charge-partial-dev")
+    user_id = UUID(reg["user_id"])
+
+    # Reduce balance to 1
+    await _set_user_balance(db_session, reg["user_id"], 1)
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                ride_data={
+                    "price": 100.00,
+                    "pickup_time": "Tomorrow · 6:05AM",
+                    "pickup_location": "Start St",
+                    "dropoff_location": "End Ave",
+                },
+            ),
+            headers=_device_headers(pairing["device_token"], "charge-partial-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    # Verify partial charge: min(3, 1) = 1
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    assert ride.credits_charged == 1  # $100+ → tier 3 credits, but only 1 available
+
+    # Verify balance is now 0
+    result = await db_session.execute(
+        select(CreditBalance.balance).where(CreditBalance.user_id == user_id)
+    )
+    assert result.scalar_one() == 0
+
+    # Verify CreditTransaction with partial amount
+    result = await db_session.execute(
+        select(CreditTransaction).where(
+            CreditTransaction.user_id == user_id,
+            CreditTransaction.type == "RIDE_CHARGE",
+        )
+    )
+    tx = result.scalar_one()
+    assert tx.amount == -1
+    assert tx.balance_after == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 37: Zero balance — credits_charged=0, log RIDE_NOT_CHARGED
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_zero_balance_not_charged(app_client, db_session, caplog):
+    """POST /rides with balance=0 -> credits_charged=0, RIDE_NOT_CHARGED logged."""
+    reg = await _register(app_client, email="charge-zero@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="charge-zero-dev")
+    user_id = UUID(reg["user_id"])
+
+    # Set balance to 0
+    await _set_user_balance(db_session, reg["user_id"], 0)
+
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        caplog.at_level(logging.WARNING, logger="app.routers.rides"),
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(idempotency_key=str(uuid4())),
+            headers=_device_headers(pairing["device_token"], "charge-zero-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    # Verify ride saved with credits_charged=0
+    result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = result.scalar_one()
+    assert ride.credits_charged == 0
+
+    # Verify no CreditTransaction RIDE_CHARGE created
+    from app.models.credit_transaction import CreditTransaction
+
+    result = await db_session.execute(
+        select(CreditTransaction).where(
+            CreditTransaction.user_id == user_id,
+            CreditTransaction.type == "RIDE_CHARGE",
+        )
+    )
+    assert result.scalar_one_or_none() is None
+
+    # Verify RIDE_NOT_CHARGED warning logged
+    not_charged_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "RIDE_NOT_CHARGED" in r.message
+    ]
+    assert len(not_charged_records) == 1
+    assert str(ride_id) in not_charged_records[0].message
+
+
+# ---------------------------------------------------------------------------
+# Test 38: Tier matching — verify all tiers ($15→1, $25→2, $100→3)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_tier_matching_all_tiers(app_client, db_session):
+    """POST /rides with different prices -> correct credits charged per tier."""
+    reg = await _register(app_client, email="tiers@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="tiers-dev")
+
+    # Default tiers: ≤$20→1, ≤$50→2, >$50→3
+    # User starts with 10 credits
+    tier_cases = [
+        (15.00, 1),  # $15 → tier 1 (≤$20)
+        (25.00, 2),  # $25 → tier 2 ($20<x≤$50)
+        (100.00, 3),  # $100 → tier 3 (>$50, catch-all)
+    ]
+
+    for price, expected_credits in tier_cases:
+        with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+            resp = await app_client.post(
+                RIDES_URL,
+                json=_ride_body(
+                    idempotency_key=str(uuid4()),
+                    ride_data={
+                        "price": price,
+                        "pickup_time": "Tomorrow · 6:05AM",
+                        "pickup_location": "Start St",
+                        "dropoff_location": "End Ave",
+                    },
+                ),
+                headers=_device_headers(pairing["device_token"], "tiers-dev"),
+            )
+
+        assert resp.status_code == 201, f"Failed for price={price}"
+        ride_id = UUID(resp.json()["ride_id"])
+
+        result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+        ride = result.scalar_one()
+        assert ride.credits_charged == expected_credits, (
+            f"Price ${price}: expected {expected_credits} credits, got {ride.credits_charged}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 39: Ride + CreditTransaction atomicity — both or neither saved
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_credit_transaction_atomic(app_client, db_session):
+    """POST /rides -> ride and CreditTransaction committed atomically."""
+    from app.models.credit_transaction import CreditTransaction
+
+    reg = await _register(app_client, email="atomic@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="atomic-dev")
+    user_id = UUID(reg["user_id"])
+
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(
+                idempotency_key=str(uuid4()),
+                ride_data={
+                    "price": 30.00,
+                    "pickup_time": "Tomorrow · 6:05AM",
+                    "pickup_location": "Start St",
+                    "dropoff_location": "End Ave",
+                },
+            ),
+            headers=_device_headers(pairing["device_token"], "atomic-dev"),
+        )
+
+    assert resp.status_code == 201
+    ride_id = UUID(resp.json()["ride_id"])
+
+    # Both ride and transaction exist
+    ride_result = await db_session.execute(select(Ride).where(Ride.id == ride_id))
+    ride = ride_result.scalar_one()
+    assert ride.credits_charged == 2
+
+    tx_result = await db_session.execute(
+        select(CreditTransaction).where(
+            CreditTransaction.reference_id == ride_id,
+            CreditTransaction.type == "RIDE_CHARGE",
+        )
+    )
+    tx = tx_result.scalar_one()
+    assert tx.amount == -2
+    assert tx.balance_after == 8
+    assert tx.user_id == user_id
+
+
+# ---------------------------------------------------------------------------
+# Test 40: Idempotent replay does NOT double-charge
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_idempotent_replay_no_double_charge(app_client, db_session):
+    """POST /rides with same idempotency_key twice -> credits charged only once."""
+    from app.models.credit_balance import CreditBalance
+    from app.models.credit_transaction import CreditTransaction
+
+    reg = await _register(app_client, email="no-double@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="no-double-dev")
+    user_id = UUID(reg["user_id"])
+
+    idem_key = str(uuid4())
+    body = _ride_body(idempotency_key=idem_key)
+
+    # First request → 201
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp1 = await app_client.post(
+            RIDES_URL,
+            json=body,
+            headers=_device_headers(pairing["device_token"], "no-double-dev"),
+        )
+    assert resp1.status_code == 201
+
+    # Second request with same idempotency_key → 200
+    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        resp2 = await app_client.post(
+            RIDES_URL,
+            json=body,
+            headers=_device_headers(pairing["device_token"], "no-double-dev"),
+        )
+    assert resp2.status_code == 200
+
+    # Balance should reflect only ONE charge (10 - 2 = 8, not 10 - 4 = 6)
+    result = await db_session.execute(
+        select(CreditBalance.balance).where(CreditBalance.user_id == user_id)
+    )
+    assert result.scalar_one() == 8
+
+    # Only one RIDE_CHARGE transaction
+    result = await db_session.execute(
+        select(func.count())
+        .select_from(CreditTransaction)
+        .where(
+            CreditTransaction.user_id == user_id,
+            CreditTransaction.type == "RIDE_CHARGE",
+        )
+    )
+    assert result.scalar_one() == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 41: CREDITS_DEPLETED push — balance=2, cost=2 → depleted, FCM called
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_credits_depleted_push_sent(app_client, db_session):
+    """POST /rides that depletes balance -> send_credits_depleted called."""
+    reg = await _register(app_client, email="depleted-push@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="depleted-push-dev")
+
+    # Set balance to exactly 2 (ride cost for $25.50 = 2 credits)
+    await _set_user_balance(db_session, reg["user_id"], 2)
+
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.routers.rides.send_credits_depleted", new_callable=AsyncMock) as mock_depleted,
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(idempotency_key=str(uuid4())),
+            headers=_device_headers(pairing["device_token"], "depleted-push-dev"),
+        )
+
+    assert resp.status_code == 201
+    mock_depleted.assert_called_once()
+    call_args = mock_depleted.call_args
+    assert call_args[0][1] == UUID(reg["user_id"])  # user_id
+
+
+# ---------------------------------------------------------------------------
+# Test 42: CREDITS_DEPLETED push NOT sent — balance=5, cost=2 → balance=3
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_credits_not_depleted_no_push(app_client, db_session):
+    """POST /rides that doesn't deplete balance -> send_credits_depleted NOT called."""
+    reg = await _register(app_client, email="not-depleted@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="not-depleted-dev")
+
+    # Balance stays at default 10, cost = 2 → remaining 8
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.routers.rides.send_credits_depleted", new_callable=AsyncMock) as mock_depleted,
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(idempotency_key=str(uuid4())),
+            headers=_device_headers(pairing["device_token"], "not-depleted-dev"),
+        )
+
+    assert resp.status_code == 201
+    mock_depleted.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 43: CREDITS_DEPLETED push NOT sent — balance=0, charged=0
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_zero_balance_no_depleted_push(app_client, db_session):
+    """POST /rides with zero balance -> credits_charged=0, no CREDITS_DEPLETED push."""
+    reg = await _register(app_client, email="zero-no-push@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="zero-no-push-dev")
+
+    # Set balance to 0
+    await _set_user_balance(db_session, reg["user_id"], 0)
+
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.routers.rides.send_credits_depleted", new_callable=AsyncMock) as mock_depleted,
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(idempotency_key=str(uuid4())),
+            headers=_device_headers(pairing["device_token"], "zero-no-push-dev"),
+        )
+
+    assert resp.status_code == 201
+    mock_depleted.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 44: CREDITS_DEPLETED FCM failure does not block ride creation
+# ---------------------------------------------------------------------------
+
+
+async def test_create_ride_credits_depleted_fcm_failure_still_saves(app_client, db_session):
+    """FCM failure in send_credits_depleted does not block ride creation."""
+    reg = await _register(app_client, email="depleted-fail@example.com")
+    pairing = await _pair_device(app_client, reg["access_token"], device_id="depleted-fail-dev")
+
+    # Set balance to 2 → will deplete to 0
+    await _set_user_balance(db_session, reg["user_id"], 2)
+
+    with (
+        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch(
+            "app.routers.rides.send_credits_depleted",
+            new_callable=AsyncMock,
+            side_effect=Exception("FCM down"),
+        ),
+    ):
+        resp = await app_client.post(
+            RIDES_URL,
+            json=_ride_body(idempotency_key=str(uuid4())),
+            headers=_device_headers(pairing["device_token"], "depleted-fail-dev"),
+        )
+
+    # Ride still created successfully despite FCM failure
+    assert resp.status_code == 201
+    assert "ride_id" in resp.json()

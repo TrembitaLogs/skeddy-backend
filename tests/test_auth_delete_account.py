@@ -3,7 +3,10 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.models.accept_failure import AcceptFailure
+from app.models.credit_balance import CreditBalance
+from app.models.credit_transaction import CreditTransaction
 from app.models.paired_device import PairedDevice
+from app.models.purchase_order import PurchaseOrder
 from app.models.refresh_token import RefreshToken
 from app.models.ride import Ride
 from app.models.search_filters import SearchFilters
@@ -106,12 +109,14 @@ async def test_delete_account_removes_user_from_db(app_client, db_session):
 
 
 async def test_delete_account_cascades_all_related_data(app_client, db_session):
-    """After deletion, ALL related records across all 6 child tables are removed."""
+    """After deletion, ALL related records across all 9 child tables are removed."""
     reg = await _register_and_get_tokens(app_client, email="del-cascade@example.com")
     user_id = UUID(reg["user_id"])
 
-    # Registration auto-creates: RefreshToken, SearchFilters, SearchStatus.
-    # Manually create the remaining related entities: PairedDevice, Ride, AcceptFailure.
+    # Registration auto-creates: RefreshToken, SearchFilters, SearchStatus,
+    # CreditBalance, CreditTransaction (REGISTRATION_BONUS).
+    # Manually create the remaining related entities: PairedDevice, Ride,
+    # AcceptFailure, PurchaseOrder.
     device = PairedDevice(
         user_id=user_id,
         device_id="cascade-test-device",
@@ -125,6 +130,7 @@ async def test_delete_account_cascades_all_related_data(app_client, db_session):
         idempotency_key="cascade-test-ride-key",
         event_type="ACCEPTED",
         ride_data={"price": 30.0, "pickup_time": "09:00 AM"},
+        ride_hash="a" * 64,
     )
     db_session.add(ride)
 
@@ -134,7 +140,24 @@ async def test_delete_account_cascades_all_related_data(app_client, db_session):
         ride_price=25.0,
     )
     db_session.add(failure)
+
+    purchase = PurchaseOrder(
+        user_id=user_id,
+        product_id="credits_50",
+        purchase_token="cascade-test-token",
+        credits_amount=50,
+    )
+    db_session.add(purchase)
     await db_session.flush()
+
+    # Confirm billing records exist before deletion
+    bal = await db_session.execute(select(CreditBalance).where(CreditBalance.user_id == user_id))
+    assert bal.scalar_one_or_none() is not None
+
+    txns = await db_session.execute(
+        select(CreditTransaction).where(CreditTransaction.user_id == user_id)
+    )
+    assert len(txns.scalars().all()) >= 1
 
     response = await app_client.request(
         "DELETE",
@@ -166,6 +189,21 @@ async def test_delete_account_cascades_all_related_data(app_client, db_session):
         select(AcceptFailure).where(AcceptFailure.user_id == user_id)
     )
     assert failures.scalars().all() == []
+
+    balances = await db_session.execute(
+        select(CreditBalance).where(CreditBalance.user_id == user_id)
+    )
+    assert balances.scalar_one_or_none() is None
+
+    transactions = await db_session.execute(
+        select(CreditTransaction).where(CreditTransaction.user_id == user_id)
+    )
+    assert transactions.scalars().all() == []
+
+    orders = await db_session.execute(
+        select(PurchaseOrder).where(PurchaseOrder.user_id == user_id)
+    )
+    assert orders.scalars().all() == []
 
 
 # --- Additional: after deletion, login with same credentials fails ---

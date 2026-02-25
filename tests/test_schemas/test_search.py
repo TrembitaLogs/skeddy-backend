@@ -19,10 +19,12 @@ class TestSearchStatusResponse:
             is_active=False,
             is_online=False,
             last_ping_at=None,
+            credits_balance=0,
         )
         assert response.is_active is False
         assert response.is_online is False
         assert response.last_ping_at is None
+        assert response.credits_balance == 0
 
     def test_all_fields_populated(self):
         """Schema accepts fully populated fields."""
@@ -31,10 +33,12 @@ class TestSearchStatusResponse:
             is_active=True,
             is_online=True,
             last_ping_at=ts,
+            credits_balance=42,
         )
         assert response.is_active is True
         assert response.is_online is True
         assert response.last_ping_at == ts
+        assert response.credits_balance == 42
 
     def test_serialization_datetime_as_string(self):
         """last_ping_at serializes to string in JSON mode."""
@@ -43,6 +47,7 @@ class TestSearchStatusResponse:
             is_active=True,
             is_online=True,
             last_ping_at=ts,
+            credits_balance=10,
         )
         data = response.model_dump(mode="json")
         assert isinstance(data["last_ping_at"], str)
@@ -50,7 +55,12 @@ class TestSearchStatusResponse:
     def test_missing_required_field_raises(self):
         """Missing is_active raises ValidationError."""
         with pytest.raises(ValidationError):
-            SearchStatusResponse(is_online=False, last_ping_at=None)
+            SearchStatusResponse(is_online=False, last_ping_at=None, credits_balance=0)
+
+    def test_missing_credits_balance_raises(self):
+        """Missing credits_balance raises ValidationError."""
+        with pytest.raises(ValidationError):
+            SearchStatusResponse(is_active=False, is_online=False, last_ping_at=None)
 
 
 class TestCalculateIsOnline:

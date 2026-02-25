@@ -6,7 +6,13 @@ import pytest
 from firebase_admin import exceptions, messaging
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.fcm_service import clear_fcm_token, initialize_firebase, send_push
+from app.services.fcm_service import (
+    clear_fcm_token,
+    initialize_firebase,
+    send_credits_depleted,
+    send_push,
+    send_ride_credit_refunded,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -462,3 +468,174 @@ class TestSendPushErrorLogging:
             error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
             assert len(error_records) == 1
             assert "3 attempts" in error_records[0].message
+
+
+# --- Task 12.1: send_credits_depleted tests ---
+
+
+class TestSendCreditsDepleted:
+    """Test send_credits_depleted helper function."""
+
+    @pytest.fixture
+    def user_id(self):
+        return uuid.uuid4()
+
+    async def test_sends_push_with_correct_payload(self, user_id):
+        """Calls send_push with CREDITS_DEPLETED type and balance='0'."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        # Simulate User.fcm_token query returning a token
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_send:
+            await send_credits_depleted(mock_db, user_id)
+
+            mock_send.assert_called_once_with(
+                mock_db,
+                "test-fcm-token",
+                "CREDITS_DEPLETED",
+                {"balance": "0"},
+                user_id,
+            )
+
+    async def test_all_payload_values_are_strings(self, user_id):
+        """FCM data payload must have all string values."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_send:
+            await send_credits_depleted(mock_db, user_id)
+
+            payload = mock_send.call_args[0][3]
+            for value in payload.values():
+                assert isinstance(value, str)
+
+    async def test_skips_when_no_fcm_token(self, user_id):
+        """Does not call send_push if user has no FCM token."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+        ) as mock_send:
+            await send_credits_depleted(mock_db, user_id)
+
+            mock_send.assert_not_called()
+
+    async def test_does_not_raise_on_fcm_failure(self, user_id):
+        """Fire-and-forget: FCM exceptions do not propagate."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+            side_effect=Exception("FCM down"),
+        ):
+            # Should not raise
+            await send_credits_depleted(mock_db, user_id)
+
+
+# --- Task 12.3: send_ride_credit_refunded tests ---
+
+
+class TestSendRideCreditRefunded:
+    """Test send_ride_credit_refunded helper function."""
+
+    @pytest.fixture
+    def user_id(self):
+        return uuid.uuid4()
+
+    @pytest.fixture
+    def ride_id(self):
+        return uuid.uuid4()
+
+    async def test_sends_push_with_correct_payload(self, user_id, ride_id):
+        """Calls send_push with RIDE_CREDIT_REFUNDED type and correct data."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_send:
+            await send_ride_credit_refunded(mock_db, user_id, ride_id, 2, 15)
+
+            mock_send.assert_called_once_with(
+                mock_db,
+                "test-fcm-token",
+                "RIDE_CREDIT_REFUNDED",
+                {
+                    "ride_id": str(ride_id),
+                    "credits_refunded": "2",
+                    "new_balance": "15",
+                },
+                user_id,
+            )
+
+    async def test_all_payload_values_are_strings(self, user_id, ride_id):
+        """FCM data payload must have all string values."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_send:
+            await send_ride_credit_refunded(mock_db, user_id, ride_id, 3, 10)
+
+            payload = mock_send.call_args[0][3]
+            for value in payload.values():
+                assert isinstance(value, str)
+
+    async def test_skips_when_no_fcm_token(self, user_id, ride_id):
+        """Does not call send_push if user has no FCM token."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+        ) as mock_send:
+            await send_ride_credit_refunded(mock_db, user_id, ride_id, 2, 15)
+
+            mock_send.assert_not_called()
+
+    async def test_does_not_raise_on_fcm_failure(self, user_id, ride_id):
+        """Fire-and-forget: FCM exceptions do not propagate."""
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_db.execute.return_value = mock_result
+
+        with patch(
+            "app.services.fcm_service.send_push",
+            new_callable=AsyncMock,
+            side_effect=Exception("FCM down"),
+        ):
+            # Should not raise
+            await send_ride_credit_refunded(mock_db, user_id, ride_id, 2, 15)

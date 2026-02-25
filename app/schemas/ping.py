@@ -29,6 +29,13 @@ class PingStats(BaseModel):
     accept_failures: list[AcceptFailureItem] = []
 
 
+class RideStatusReport(BaseModel):
+    """Single ride verification status reported by search device."""
+
+    ride_hash: str = Field(min_length=1)
+    present: bool
+
+
 class PingRequest(BaseModel):
     """Request schema for POST /ping from search device."""
 
@@ -37,12 +44,19 @@ class PingRequest(BaseModel):
     device_health: DeviceHealth | None = None
     stats: PingStats | None = None
     last_cycle_duration_ms: int | None = None
+    ride_statuses: list[RideStatusReport] | None = None
 
 
 class PingFiltersResponse(BaseModel):
     """Minimal filters included in ping response (only fields needed by search device)."""
 
     min_price: float
+
+
+class VerifyRideItem(BaseModel):
+    """Single ride hash for Search App to verify presence in Lyft Driver."""
+
+    ride_hash: str
 
 
 class PingResponse(BaseModel):
@@ -52,4 +66,6 @@ class PingResponse(BaseModel):
     interval_seconds: int
     force_update: bool = False
     update_url: str | None = None
+    reason: str | None = None
     filters: PingFiltersResponse
+    verify_rides: list[VerifyRideItem] | None = None

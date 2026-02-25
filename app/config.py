@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIALS_PATH: str = ""
     FIREBASE_CREDENTIALS_JSON: str = ""
 
+    # Google Play Billing
+    GOOGLE_PLAY_CREDENTIALS_JSON: str = ""
+    GOOGLE_PLAY_CREDENTIALS_PATH: str = ""
+    GOOGLE_PLAY_PACKAGE_NAME: str = ""
+
     # Sentry
     SENTRY_DSN: str = ""
 

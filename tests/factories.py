@@ -20,7 +20,10 @@ import bcrypt
 import factory
 
 from app.models.accept_failure import AcceptFailure
+from app.models.credit_balance import CreditBalance
+from app.models.credit_transaction import CreditTransaction
 from app.models.paired_device import PairedDevice
+from app.models.purchase_order import PurchaseOrder
 from app.models.refresh_token import RefreshToken
 from app.models.ride import Ride
 from app.models.search_filters import SearchFilters
@@ -40,6 +43,15 @@ class UserFactory(factory.Factory):
     password_hash = _TEST_PASSWORD_HASH
     phone_number = None
     fcm_token = None
+
+
+class CreditBalanceFactory(factory.Factory):
+    class Meta:
+        model = CreditBalance
+
+    id = factory.LazyFunction(uuid.uuid4)
+    user_id = factory.LazyFunction(uuid.uuid4)
+    balance = 0
 
 
 class SearchFiltersFactory(factory.Factory):
@@ -98,6 +110,7 @@ class RideFactory(factory.Factory):
             "dropoff_location": "456 Oak Ave",
         }
     )
+    ride_hash = "a" * 64
 
 
 class AcceptFailureFactory(factory.Factory):
@@ -109,6 +122,33 @@ class AcceptFailureFactory(factory.Factory):
     reason = "AcceptButtonNotFound"
     ride_price = 25.50
     pickup_time = "Tomorrow 6:05AM"
+
+
+class CreditTransactionFactory(factory.Factory):
+    class Meta:
+        model = CreditTransaction
+
+    id = factory.LazyFunction(uuid.uuid4)
+    user_id = factory.LazyFunction(uuid.uuid4)
+    type = "PURCHASE"
+    amount = 10
+    balance_after = 10
+    reference_id = None
+    description = None
+
+
+class PurchaseOrderFactory(factory.Factory):
+    class Meta:
+        model = PurchaseOrder
+
+    id = factory.LazyFunction(uuid.uuid4)
+    user_id = factory.LazyFunction(uuid.uuid4)
+    google_order_id = None
+    product_id = "credits_10"
+    purchase_token = factory.LazyFunction(lambda: f"token_{uuid.uuid4().hex}")
+    credits_amount = 10
+    status = "PENDING"
+    verified_at = None
 
 
 class RefreshTokenFactory(factory.Factory):
