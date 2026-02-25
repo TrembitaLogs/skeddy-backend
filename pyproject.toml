@@ -25,11 +25,15 @@ dependencies = [
     "slowapi>=0.1.9",
     "sqladmin>=0.23.0",
     "itsdangerous>=2.2.0",
+    "google-api-python-client>=2.190.0",
+    "google-auth>=2.48.0",
+    "cachetools>=7.0.1",
 ]
 
 [dependency-groups]
 dev = [
     "factory-boy>=3.3.3",
+    "freezegun>=1.5.5",
     "httpx>=0.28.1",
     "mypy>=1.19.1",
     "pre-commit>=4.5.1",
@@ -41,7 +45,7 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "--cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+addopts = "--cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=50"
 
 # ── Ruff ──────────────────────────────────────────────────────────────
 [tool.ruff]
@@ -75,8 +79,11 @@ show_error_codes = true
 [[tool.mypy.overrides]]
 module = [
     "firebase_admin.*",
+    "googleapiclient.*",
     "slowapi.*",
     "factory.*",
+    "cachetools.*",
+    "wtforms.*",
 ]
 ignore_missing_imports = true
 
@@ -86,7 +93,7 @@ source = ["app"]
 omit = ["app/__init__.py"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 50
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

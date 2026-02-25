@@ -5,11 +5,17 @@ from uuid import UUID
 
 import firebase_admin
 from firebase_admin import credentials, exceptions, messaging
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.user import User
+from app.schemas.fcm import (
+    NotificationType,
+    create_credits_depleted_payload,
+    create_credits_low_payload,
+    create_ride_credit_refunded_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,3 +138,88 @@ async def send_push(
                 return False
 
     return False  # Unreachable; satisfies type checker
+
+
+async def send_ride_credit_refunded(
+    db: AsyncSession,
+    user_id: UUID,
+    ride_id: UUID,
+    credits_refunded: int,
+    new_balance: int,
+) -> None:
+    """Send RIDE_CREDIT_REFUNDED push when a ride is verified as CANCELLED.
+
+    Fire-and-forget: exceptions are caught and logged, never propagated.
+    """
+    try:
+        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
+        fcm_token = result.scalar_one_or_none()
+        if not fcm_token:
+            logger.debug(
+                "No FCM token for user %s, skipping RIDE_CREDIT_REFUNDED push",
+                user_id,
+            )
+            return
+
+        payload = create_ride_credit_refunded_payload(
+            ride_id=ride_id,
+            credits_refunded=credits_refunded,
+            new_balance=new_balance,
+        )
+        await send_push(db, fcm_token, NotificationType.RIDE_CREDIT_REFUNDED, payload, user_id)
+        logger.info("FCM_RIDE_CREDIT_REFUNDED_SENT: user_id=%s, ride_id=%s", user_id, ride_id)
+    except Exception:
+        logger.warning(
+            "FCM RIDE_CREDIT_REFUNDED failed for user %s, ride_id=%s",
+            user_id,
+            ride_id,
+            exc_info=True,
+        )
+
+
+async def send_credits_depleted(db: AsyncSession, user_id: UUID) -> None:
+    """Send CREDITS_DEPLETED push notification when user balance reaches zero.
+
+    Fire-and-forget: exceptions are caught and logged, never propagated.
+    """
+    try:
+        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
+        fcm_token = result.scalar_one_or_none()
+        if not fcm_token:
+            logger.debug("No FCM token for user %s, skipping CREDITS_DEPLETED push", user_id)
+            return
+
+        payload = create_credits_depleted_payload()
+        await send_push(db, fcm_token, NotificationType.CREDITS_DEPLETED, payload, user_id)
+        logger.info("FCM_CREDITS_DEPLETED_SENT: user_id=%s", user_id)
+    except Exception:
+        logger.warning("FCM CREDITS_DEPLETED failed for user %s", user_id, exc_info=True)
+
+
+async def send_credits_low(
+    db: AsyncSession,
+    user_id: UUID,
+    balance: int,
+    threshold: int,
+) -> None:
+    """Send CREDITS_LOW push notification when user balance is below threshold.
+
+    Fire-and-forget: exceptions are caught and logged, never propagated.
+    """
+    try:
+        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
+        fcm_token = result.scalar_one_or_none()
+        if not fcm_token:
+            logger.debug("No FCM token for user %s, skipping CREDITS_LOW push", user_id)
+            return
+
+        payload = create_credits_low_payload(balance=balance, threshold=threshold)
+        await send_push(db, fcm_token, NotificationType.CREDITS_LOW, payload, user_id)
+        logger.info(
+            "FCM_CREDITS_LOW_SENT: user_id=%s, balance=%d, threshold=%d",
+            user_id,
+            balance,
+            threshold,
+        )
+    except Exception:
+        logger.warning("FCM CREDITS_LOW failed for user %s", user_id, exc_info=True)

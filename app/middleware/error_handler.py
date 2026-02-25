@@ -47,6 +47,10 @@ ERROR_MESSAGES: dict[str, str] = {
     # Resource
     "NO_PAIRED_DEVICE": "No paired device found",
     "EMAIL_NOT_VERIFIED": "Please verify your email to start searching",
+    # Credits / Billing
+    "INSUFFICIENT_CREDITS": "Insufficient credits to start searching",
+    "UNKNOWN_PRODUCT": "Unknown product ID",
+    "INVALID_PURCHASE_TOKEN": "Invalid Google Play purchase token",
     # Rate limiting
     "RATE_LIMIT_EXCEEDED": "Rate limit exceeded",
     # Service

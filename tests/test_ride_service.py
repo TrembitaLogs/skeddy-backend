@@ -36,6 +36,7 @@ async def _create_ride(
         idempotency_key=idempotency_key or str(uuid4()),
         event_type=event_type,
         ride_data=ride_data or {"price": 25.0, "pickup_time": "10:00 AM"},
+        ride_hash="a" * 64,
     )
     db.add(ride)
     await db.flush()
@@ -103,6 +104,7 @@ async def test_create_ride_returns_ride_with_correct_fields(db_session):
         idempotency_key=key,
         event_type="ACCEPTED",
         ride_data=data,
+        ride_hash="a" * 64,
     )
 
     assert ride.id is not None
@@ -123,6 +125,7 @@ async def test_create_ride_persists_to_database(db_session):
         idempotency_key=key,
         event_type="ACCEPTED",
         ride_data={"price": 20.0},
+        ride_hash="a" * 64,
     )
 
     result = await db_session.execute(select(Ride).where(Ride.id == ride.id))
@@ -142,6 +145,7 @@ async def test_create_ride_duplicate_idempotency_key_raises_integrity_error(db_s
         idempotency_key=key,
         event_type="ACCEPTED",
         ride_data={"price": 25.0},
+        ride_hash="a" * 64,
     )
 
     with pytest.raises(IntegrityError):
@@ -151,6 +155,7 @@ async def test_create_ride_duplicate_idempotency_key_raises_integrity_error(db_s
             idempotency_key=key,
             event_type="ACCEPTED",
             ride_data={"price": 30.0},
+            ride_hash="a" * 64,
         )
 
 
@@ -166,6 +171,7 @@ async def test_create_ride_same_key_different_users_ok(db_session):
         idempotency_key=key,
         event_type="ACCEPTED",
         ride_data={"price": 25.0},
+        ride_hash="a" * 64,
     )
     ride_b = await create_ride(
         db_session,
@@ -173,6 +179,7 @@ async def test_create_ride_same_key_different_users_ok(db_session):
         idempotency_key=key,
         event_type="ACCEPTED",
         ride_data={"price": 30.0},
+        ride_hash="a" * 64,
     )
 
     assert ride_a.id != ride_b.id
@@ -205,6 +212,7 @@ async def test_get_user_ride_events_ordered_newest_first(db_session):
         idempotency_key=str(uuid4()),
         event_type="ACCEPTED",
         ride_data={"price": 10.0},
+        ride_hash="a" * 64,
         created_at=base_time,
     )
     ride2 = Ride(
@@ -212,6 +220,7 @@ async def test_get_user_ride_events_ordered_newest_first(db_session):
         idempotency_key=str(uuid4()),
         event_type="ACCEPTED",
         ride_data={"price": 20.0},
+        ride_hash="a" * 64,
         created_at=base_time + timedelta(hours=1),
     )
     ride3 = Ride(
@@ -219,6 +228,7 @@ async def test_get_user_ride_events_ordered_newest_first(db_session):
         idempotency_key=str(uuid4()),
         event_type="ACCEPTED",
         ride_data={"price": 30.0},
+        ride_hash="a" * 64,
         created_at=base_time + timedelta(hours=2),
     )
     db_session.add_all([ride1, ride2, ride3])
@@ -276,6 +286,7 @@ async def test_get_user_ride_events_since_filters_old_events(db_session):
         idempotency_key=str(uuid4()),
         event_type="ACCEPTED",
         ride_data={"price": 10.0},
+        ride_hash="a" * 64,
         created_at=base_time,
     )
     new_ride = Ride(
@@ -283,6 +294,7 @@ async def test_get_user_ride_events_since_filters_old_events(db_session):
         idempotency_key=str(uuid4()),
         event_type="ACCEPTED",
         ride_data={"price": 20.0},
+        ride_hash="a" * 64,
         created_at=base_time + timedelta(days=60),
     )
     db_session.add_all([old_ride, new_ride])
@@ -309,6 +321,7 @@ async def test_get_user_ride_events_since_none_returns_all(db_session):
             idempotency_key=str(uuid4()),
             event_type="ACCEPTED",
             ride_data={"price": 10.0 + i},
+            ride_hash="a" * 64,
             created_at=base_time + timedelta(days=i * 30),
         )
         db_session.add(ride)

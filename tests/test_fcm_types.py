@@ -7,8 +7,11 @@ from pydantic import ValidationError
 from app.schemas.fcm import (
     NotificationType,
     RideAcceptedData,
+    RideCreditRefundedData,
     SearchOfflineData,
+    create_credits_depleted_payload,
     create_ride_accepted_payload,
+    create_ride_credit_refunded_payload,
     create_search_offline_payload,
 )
 
@@ -27,8 +30,17 @@ class TestNotificationType:
         result = f"type={NotificationType.RIDE_ACCEPTED}"
         assert result == "type=RIDE_ACCEPTED"
 
-    def test_enum_has_exactly_two_members(self):
-        assert len(NotificationType) == 2
+    def test_credits_depleted_value(self):
+        assert NotificationType.CREDITS_DEPLETED == "CREDITS_DEPLETED"
+
+    def test_ride_credit_refunded_value(self):
+        assert NotificationType.RIDE_CREDIT_REFUNDED == "RIDE_CREDIT_REFUNDED"
+
+    def test_credits_low_value(self):
+        assert NotificationType.CREDITS_LOW == "CREDITS_LOW"
+
+    def test_enum_has_exactly_five_members(self):
+        assert len(NotificationType) == 5
 
 
 class TestRideAcceptedData:
@@ -231,4 +243,126 @@ class TestCreateSearchOfflinePayload:
             create_search_offline_payload(
                 device_id="android_device_123",
                 last_ping_at="not-a-datetime",
+            )
+
+
+class TestCreateCreditsDepletedPayload:
+    """Test create_credits_depleted_payload returns correct dict."""
+
+    def test_returns_dict_with_string_values(self):
+        result = create_credits_depleted_payload()
+        for value in result.values():
+            assert isinstance(value, str), f"Expected str, got {type(value)}: {value}"
+
+    def test_balance_is_zero_string(self):
+        result = create_credits_depleted_payload()
+        assert result["balance"] == "0"
+
+    def test_contains_only_balance_key(self):
+        result = create_credits_depleted_payload()
+        assert set(result.keys()) == {"balance"}
+
+    def test_no_notification_block(self):
+        """Payload is data-only — no 'title' or 'body' keys."""
+        result = create_credits_depleted_payload()
+        assert "title" not in result
+        assert "body" not in result
+
+
+# --- Task 12.3: RIDE_CREDIT_REFUNDED schema & payload tests ---
+
+
+class TestRideCreditRefundedData:
+    """Test RideCreditRefundedData Pydantic validation."""
+
+    def test_valid_data(self):
+        ride_id = uuid.uuid4()
+        data = RideCreditRefundedData(
+            ride_id=ride_id,
+            credits_refunded=2,
+            new_balance=15,
+        )
+        assert data.ride_id == ride_id
+        assert data.credits_refunded == 2
+        assert data.new_balance == 15
+
+    def test_accepts_uuid_string_for_ride_id(self):
+        ride_id_str = "550e8400-e29b-41d4-a716-446655440000"
+        data = RideCreditRefundedData(
+            ride_id=ride_id_str,
+            credits_refunded=3,
+            new_balance=10,
+        )
+        assert data.ride_id == uuid.UUID(ride_id_str)
+
+    def test_rejects_invalid_uuid(self):
+        with pytest.raises(ValidationError):
+            RideCreditRefundedData(
+                ride_id="not-a-uuid",
+                credits_refunded=2,
+                new_balance=15,
+            )
+
+    def test_rejects_missing_required_fields(self):
+        with pytest.raises(ValidationError):
+            RideCreditRefundedData(ride_id=uuid.uuid4())
+
+
+class TestCreateRideCreditRefundedPayload:
+    """Test create_ride_credit_refunded_payload returns dict with string values."""
+
+    def test_returns_dict_with_string_values(self):
+        ride_id = uuid.uuid4()
+        result = create_ride_credit_refunded_payload(
+            ride_id=ride_id,
+            credits_refunded=2,
+            new_balance=15,
+        )
+        for value in result.values():
+            assert isinstance(value, str), f"Expected str, got {type(value)}: {value}"
+
+    def test_uuid_serialized_correctly(self):
+        ride_id = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+        result = create_ride_credit_refunded_payload(
+            ride_id=ride_id,
+            credits_refunded=2,
+            new_balance=15,
+        )
+        assert result["ride_id"] == "550e8400-e29b-41d4-a716-446655440000"
+
+    def test_int_values_serialized_as_strings(self):
+        result = create_ride_credit_refunded_payload(
+            ride_id=uuid.uuid4(),
+            credits_refunded=2,
+            new_balance=15,
+        )
+        assert result["credits_refunded"] == "2"
+        assert result["new_balance"] == "15"
+
+    def test_contains_all_required_keys(self):
+        result = create_ride_credit_refunded_payload(
+            ride_id=uuid.uuid4(),
+            credits_refunded=2,
+            new_balance=15,
+        )
+        expected_keys = {"ride_id", "credits_refunded", "new_balance"}
+        assert set(result.keys()) == expected_keys
+
+    def test_no_notification_block(self):
+        """Payload is data-only — no 'title' or 'body' keys."""
+        result = create_ride_credit_refunded_payload(
+            ride_id=uuid.uuid4(),
+            credits_refunded=2,
+            new_balance=15,
+        )
+        assert "title" not in result
+        assert "body" not in result
+
+    def test_rejects_invalid_data(self):
+        """Pydantic validation runs before payload creation."""
+        with pytest.raises(ValidationError):
+            create_ride_credit_refunded_payload(
+                ride_id="not-a-uuid",
+                credits_refunded=2,
+                new_balance=15,
             )

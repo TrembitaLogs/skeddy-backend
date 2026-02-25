@@ -28,6 +28,8 @@ class TestCreateRideRequestValid:
                 distance="3.6 mi",
                 rider_name="Kathleen",
             ),
+            ride_hash="a" * 64,
+            timezone="America/New_York",
         )
         assert req.idempotency_key == "550e8400-e29b-41d4-a716-446655440000"
         assert req.event_type == "ACCEPTED"
@@ -49,6 +51,8 @@ class TestCreateRideRequestValid:
                 pickup_location="Main St",
                 dropoff_location="Oak Ave",
             ),
+            ride_hash="a" * 64,
+            timezone="Europe/Kyiv",
         )
         assert req.ride_data.duration is None
         assert req.ride_data.distance is None
@@ -67,6 +71,8 @@ class TestCreateRideRequestValid:
                 distance="7.2 mi",
                 rider_name="John",
             ),
+            ride_hash="a" * 64,
+            timezone="UTC",
         )
         data = req.model_dump(mode="json")
         restored = CreateRideRequest.model_validate(data)
@@ -131,6 +137,8 @@ class TestCreateRideRequestInvalidIdempotencyKey:
                 pickup_location="A",
                 dropoff_location="B",
             ),
+            ride_hash="a" * 64,
+            timezone="America/New_York",
         )
         assert req.idempotency_key == key
 

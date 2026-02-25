@@ -20,6 +20,7 @@ from app.middleware.request_id import RequestIdMiddleware
 from app.redis import redis_client
 from app.routers.admin_config import router as admin_config_router
 from app.routers.auth import router as auth_router
+from app.routers.credits import router as credits_router
 from app.routers.fcm import router as fcm_router
 from app.routers.filters import router as filters_router
 from app.routers.pairing import router as pairing_router
@@ -27,8 +28,12 @@ from app.routers.ping import router as ping_router
 from app.routers.rides import router as rides_router
 from app.routers.search import router as search_router
 from app.services.fcm_service import initialize_firebase
+from app.tasks.balance_reconciliation import run_balance_reconciliation
 from app.tasks.data_cleanup import cleanup_old_data
 from app.tasks.health_check import check_device_health
+from app.tasks.low_balance_reminder import run_low_balance_reminder
+from app.tasks.purchase_recovery import run_purchase_recovery
+from app.tasks.ride_verification import run_verification_fallback
 from app.tasks.token_cleanup import cleanup_expired_tokens
 
 setup_logging(debug=settings.DEBUG)
@@ -53,11 +58,23 @@ async def lifespan(app: FastAPI):
     health_task = asyncio.create_task(check_device_health())
     token_cleanup_task = asyncio.create_task(cleanup_expired_tokens())
     data_cleanup_task = asyncio.create_task(cleanup_old_data())
+    low_balance_task = asyncio.create_task(run_low_balance_reminder())
+    verification_task = asyncio.create_task(run_verification_fallback())
+    purchase_recovery_task = asyncio.create_task(run_purchase_recovery())
+    reconciliation_task = asyncio.create_task(run_balance_reconciliation())
 
     yield
 
     # Shutdown — cancel background tasks gracefully
-    for task in (health_task, token_cleanup_task, data_cleanup_task):
+    for task in (
+        health_task,
+        token_cleanup_task,
+        data_cleanup_task,
+        low_balance_task,
+        verification_task,
+        purchase_recovery_task,
+        reconciliation_task,
+    ):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -122,6 +139,7 @@ async def health_check():
 
 v1_router = APIRouter()
 v1_router.include_router(auth_router)
+v1_router.include_router(credits_router)
 v1_router.include_router(fcm_router)
 v1_router.include_router(filters_router)
 v1_router.include_router(pairing_router)

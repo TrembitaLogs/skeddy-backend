@@ -40,5 +40,26 @@
             </div>
         </div>
     </div>
+
+    <div class="row mt-4">
+        <div class="col-sm-6 col-xl-3">
+            <div class="card text-white bg-secondary">
+                <div class="card-body">
+                    <h5 class="card-title">Total Credits in Circulation</h5>
+                    <p class="card-text display-4">{{ "{:,}".format(total_credits) }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-sm-6 col-xl-3">
+            <div class="card text-white bg-dark">
+                <div class="card-body">
+                    <h5 class="card-title">Purchases Today</h5>
+                    <p class="card-text display-4">{{ purchases_today_count }}</p>
+                    <p class="card-text">{{ "{:,}".format(purchases_today_credits) }} credits</p>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

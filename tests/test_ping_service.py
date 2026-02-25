@@ -10,9 +10,16 @@ from sqlalchemy import select
 
 from app.models.accept_failure import AcceptFailure as AcceptFailureModel
 from app.models.paired_device import PairedDevice
+from app.models.ride import Ride
 from app.models.search_filters import SearchFilters
 from app.models.user import User
-from app.schemas.ping import AcceptFailureItem, DeviceHealth, PingRequest, PingStats
+from app.schemas.ping import (
+    AcceptFailureItem,
+    DeviceHealth,
+    PingRequest,
+    PingStats,
+    RideStatusReport,
+)
 from app.services.ping_service import (
     BATCH_DEDUP_TTL,
     BATCH_KEY_PREFIX,
@@ -23,6 +30,7 @@ from app.services.ping_service import (
     is_within_schedule,
     mark_batch_as_processed,
     parse_time,
+    process_ride_status_reports,
     process_stats_if_new,
     save_accept_failures,
     update_device_state,
@@ -1131,3 +1139,157 @@ def test_dynamic_interval_different_rpd():
     result = calculate_dynamic_interval(3840, _WEIGHTS, 12, 15000)
     # 6.24% of 3840 = 239.616 rph -> 15.02s total -> 15.02 - 15 = 0.02 -> clamped to 5
     assert result == MIN_INTERVAL_SECONDS
+
+
+# === process_ride_status_reports tests ===
+#
+# Test strategy items from task 6.2:
+# 1. ride_statuses with present=true → last_reported_present updated
+# 2. present=false + disappeared_at=NULL → disappeared_at recorded
+# 3. present=false + disappeared_at already set → disappeared_at unchanged
+# 4. Unknown ride_hash → ignored without error
+# 5. Bulk update of multiple rides in one call
+
+
+async def _create_ride_for_verification(
+    db_session,
+    user_id: uuid.UUID,
+    ride_hash: str = "a" * 64,
+    disappeared_at: datetime | None = None,
+    last_reported_present: bool | None = None,
+) -> Ride:
+    """Create a Ride in the test DB for verification tests."""
+    ride = Ride(
+        user_id=user_id,
+        idempotency_key=str(uuid.uuid4()),
+        event_type="ACCEPTED",
+        ride_data={"price": 25.0},
+        ride_hash=ride_hash,
+        disappeared_at=disappeared_at,
+        last_reported_present=last_reported_present,
+    )
+    db_session.add(ride)
+    await db_session.flush()
+    return ride
+
+
+# --- Test 1: present=true → last_reported_present updated to true ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_present_true(db_session):
+    user = await _create_user_for_failures(db_session)
+    ride = await _create_ride_for_verification(db_session, user.id, ride_hash="a1b2c3" + "0" * 58)
+    assert ride.last_reported_present is None
+
+    reports = [RideStatusReport(ride_hash=ride.ride_hash, present=True)]
+    updated = await process_ride_status_reports(db_session, user.id, reports)
+
+    assert updated == 1
+    assert ride.last_reported_present is True
+    assert ride.disappeared_at is None
+
+
+# --- Test 2: present=false + disappeared_at=NULL → disappeared_at recorded ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_present_false_sets_disappeared_at(db_session):
+    user = await _create_user_for_failures(db_session)
+    ride = await _create_ride_for_verification(db_session, user.id, ride_hash="d4e5f6" + "0" * 58)
+    assert ride.disappeared_at is None
+
+    reports = [RideStatusReport(ride_hash=ride.ride_hash, present=False)]
+    fixed_now = datetime(2024, 6, 1, 12, 0, tzinfo=UTC)
+    with _patch_now(fixed_now):
+        updated = await process_ride_status_reports(db_session, user.id, reports)
+
+    assert updated == 1
+    assert ride.last_reported_present is False
+    assert ride.disappeared_at == fixed_now
+
+
+# --- Test 3: present=false + disappeared_at already set → not overwritten ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_disappeared_at_not_overwritten(db_session):
+    user = await _create_user_for_failures(db_session)
+    original_disappeared = datetime(2024, 5, 1, 10, 0, tzinfo=UTC)
+    ride = await _create_ride_for_verification(
+        db_session,
+        user.id,
+        ride_hash="g7h8i9" + "0" * 58,
+        disappeared_at=original_disappeared,
+    )
+
+    reports = [RideStatusReport(ride_hash=ride.ride_hash, present=False)]
+    later_now = datetime(2024, 6, 1, 12, 0, tzinfo=UTC)
+    with _patch_now(later_now):
+        updated = await process_ride_status_reports(db_session, user.id, reports)
+
+    assert updated == 1
+    assert ride.last_reported_present is False
+    assert ride.disappeared_at == original_disappeared  # NOT overwritten
+
+
+# --- Test 4: unknown ride_hash → ignored without error, returns 0 ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_unknown_hash_ignored(db_session):
+    user = await _create_user_for_failures(db_session)
+
+    reports = [RideStatusReport(ride_hash="unknown" + "0" * 57, present=True)]
+    updated = await process_ride_status_reports(db_session, user.id, reports)
+
+    assert updated == 0
+
+
+# --- Test 5: bulk update of multiple rides in one call ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_bulk_update(db_session):
+    user = await _create_user_for_failures(db_session)
+    ride1 = await _create_ride_for_verification(db_session, user.id, ride_hash="hash1" + "0" * 59)
+    ride2 = await _create_ride_for_verification(db_session, user.id, ride_hash="hash2" + "0" * 59)
+    ride3 = await _create_ride_for_verification(db_session, user.id, ride_hash="hash3" + "0" * 59)
+
+    reports = [
+        RideStatusReport(ride_hash=ride1.ride_hash, present=True),
+        RideStatusReport(ride_hash=ride2.ride_hash, present=False),
+        RideStatusReport(ride_hash=ride3.ride_hash, present=True),
+    ]
+
+    fixed_now = datetime(2024, 6, 1, 12, 0, tzinfo=UTC)
+    with _patch_now(fixed_now):
+        updated = await process_ride_status_reports(db_session, user.id, reports)
+
+    assert updated == 3
+    assert ride1.last_reported_present is True
+    assert ride1.disappeared_at is None
+    assert ride2.last_reported_present is False
+    assert ride2.disappeared_at == fixed_now
+    assert ride3.last_reported_present is True
+    assert ride3.disappeared_at is None
+
+
+# --- Test 6: None ride_statuses → returns 0, no error ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_none_input(db_session):
+    user = await _create_user_for_failures(db_session)
+    updated = await process_ride_status_reports(db_session, user.id, None)
+    assert updated == 0
+
+
+# --- Test 7: empty list → returns 0, no error ---
+
+
+@pytest.mark.asyncio
+async def test_process_ride_statuses_empty_list(db_session):
+    user = await _create_user_for_failures(db_session)
+    updated = await process_ride_status_reports(db_session, user.id, [])
+    assert updated == 0

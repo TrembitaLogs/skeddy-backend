@@ -10,6 +10,8 @@ from app.schemas.ping import (
     PingRequest,
     PingResponse,
     PingStats,
+    RideStatusReport,
+    VerifyRideItem,
 )
 
 
@@ -367,3 +369,162 @@ class TestPingRequestInvalidJson:
     def test_completely_empty_raises(self):
         with pytest.raises(ValidationError):
             PingRequest()
+
+
+class TestRideStatusReport:
+    """RideStatusReport validation."""
+
+    def test_valid_report(self):
+        report = RideStatusReport(ride_hash="a" * 64, present=True)
+        assert report.ride_hash == "a" * 64
+        assert report.present is True
+
+    def test_present_false(self):
+        report = RideStatusReport(ride_hash="b" * 64, present=False)
+        assert report.present is False
+
+    def test_empty_ride_hash_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RideStatusReport(ride_hash="", present=True)
+        assert "ride_hash" in str(exc_info.value)
+
+    def test_missing_ride_hash_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RideStatusReport(present=True)
+        assert "ride_hash" in str(exc_info.value)
+
+    def test_missing_present_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RideStatusReport(ride_hash="a" * 64)
+        assert "present" in str(exc_info.value)
+
+
+class TestVerifyRideItem:
+    """VerifyRideItem validation."""
+
+    def test_valid_item(self):
+        item = VerifyRideItem(ride_hash="c76966d3" + "a" * 56)
+        assert item.ride_hash == "c76966d3" + "a" * 56
+
+    def test_serialization(self):
+        item = VerifyRideItem(ride_hash="abc123")
+        data = item.model_dump(mode="json")
+        assert data == {"ride_hash": "abc123"}
+
+    def test_missing_ride_hash_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            VerifyRideItem()
+        assert "ride_hash" in str(exc_info.value)
+
+
+class TestPingRequestRideStatuses:
+    """PingRequest with ride_statuses field."""
+
+    def test_backward_compatible_without_ride_statuses(self):
+        """Old Search App sends no ride_statuses — should parse fine."""
+        req = PingRequest(timezone="UTC", app_version="1.0.0")
+        assert req.ride_statuses is None
+
+    def test_empty_ride_statuses_list(self):
+        """Search App sends empty ride_statuses when nothing to report."""
+        req = PingRequest(timezone="UTC", app_version="1.0.0", ride_statuses=[])
+        assert req.ride_statuses == []
+
+    def test_with_ride_statuses(self):
+        req = PingRequest(
+            timezone="America/New_York",
+            app_version="1.2.0",
+            ride_statuses=[
+                {"ride_hash": "a" * 64, "present": True},
+                {"ride_hash": "b" * 64, "present": False},
+            ],
+        )
+        assert len(req.ride_statuses) == 2
+        assert req.ride_statuses[0].ride_hash == "a" * 64
+        assert req.ride_statuses[0].present is True
+        assert req.ride_statuses[1].present is False
+
+    def test_ride_statuses_invalid_item_raises(self):
+        with pytest.raises(ValidationError):
+            PingRequest(
+                timezone="UTC",
+                app_version="1.0.0",
+                ride_statuses=[{"ride_hash": "", "present": True}],
+            )
+
+    def test_serialization_round_trip_with_ride_statuses(self):
+        req = PingRequest(
+            timezone="UTC",
+            app_version="1.0.0",
+            ride_statuses=[
+                RideStatusReport(ride_hash="c" * 64, present=True),
+            ],
+        )
+        data = req.model_dump(mode="json")
+        restored = PingRequest.model_validate(data)
+        assert len(restored.ride_statuses) == 1
+        assert restored.ride_statuses[0].ride_hash == "c" * 64
+        assert restored.ride_statuses[0].present is True
+
+
+class TestPingResponseVerifyRides:
+    """PingResponse with verify_rides field."""
+
+    def test_backward_compatible_without_verify_rides(self):
+        """Response without verify_rides — defaults to None."""
+        resp = PingResponse(
+            search=True,
+            interval_seconds=30,
+            filters=PingFiltersResponse(min_price=20.0),
+        )
+        assert resp.verify_rides is None
+
+    def test_empty_verify_rides(self):
+        resp = PingResponse(
+            search=True,
+            interval_seconds=30,
+            filters=PingFiltersResponse(min_price=20.0),
+            verify_rides=[],
+        )
+        assert resp.verify_rides == []
+
+    def test_with_verify_rides(self):
+        resp = PingResponse(
+            search=True,
+            interval_seconds=30,
+            filters=PingFiltersResponse(min_price=20.0),
+            verify_rides=[
+                VerifyRideItem(ride_hash="a" * 64),
+                VerifyRideItem(ride_hash="b" * 64),
+            ],
+        )
+        assert len(resp.verify_rides) == 2
+        assert resp.verify_rides[0].ride_hash == "a" * 64
+
+    def test_verify_rides_serialization(self):
+        resp = PingResponse(
+            search=False,
+            interval_seconds=60,
+            filters=PingFiltersResponse(min_price=25.0),
+            verify_rides=[VerifyRideItem(ride_hash="d" * 64)],
+        )
+        data = resp.model_dump(mode="json")
+        assert data["verify_rides"] == [{"ride_hash": "d" * 64}]
+        assert data["search"] is False
+
+    def test_verify_rides_independent_of_search_flag(self):
+        """verify_rides sent regardless of search: true/false (PRD section 7)."""
+        resp_active = PingResponse(
+            search=True,
+            interval_seconds=30,
+            filters=PingFiltersResponse(min_price=20.0),
+            verify_rides=[VerifyRideItem(ride_hash="e" * 64)],
+        )
+        resp_inactive = PingResponse(
+            search=False,
+            interval_seconds=60,
+            filters=PingFiltersResponse(min_price=20.0),
+            verify_rides=[VerifyRideItem(ride_hash="e" * 64)],
+        )
+        assert len(resp_active.verify_rides) == 1
+        assert len(resp_inactive.verify_rides) == 1

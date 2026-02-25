@@ -48,3 +48,15 @@ class User(Base):
     accept_failures = relationship(
         "AcceptFailure", back_populates="user", cascade="all, delete-orphan"
     )
+    credit_balance = relationship(
+        "CreditBalance",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    credit_transactions = relationship(
+        "CreditTransaction", back_populates="user", cascade="all, delete-orphan"
+    )
+    purchase_orders = relationship(
+        "PurchaseOrder", back_populates="user", cascade="all, delete-orphan"
+    )

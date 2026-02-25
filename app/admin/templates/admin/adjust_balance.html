@@ -1,0 +1,66 @@
+{% extends "sqladmin/layout.html" %}
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col">
+            <a href="/admin/credit-balance/list" class="btn btn-secondary btn-sm">
+                <i class="fa-solid fa-arrow-left"></i> Back to Credit Balances
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Adjust Balance</h3>
+                </div>
+                <div class="card-body">
+                    <dl class="row mb-4">
+                        <dt class="col-sm-4">User Email</dt>
+                        <dd class="col-sm-8">{{ user_email }}</dd>
+                        <dt class="col-sm-4">User ID</dt>
+                        <dd class="col-sm-8"><code>{{ user_id }}</code></dd>
+                        <dt class="col-sm-4">Current Balance</dt>
+                        <dd class="col-sm-8"><strong>{{ current_balance }}</strong> credits</dd>
+                    </dl>
+
+                    {% if error %}
+                    <div class="alert alert-danger" role="alert">
+                        {{ error }}
+                    </div>
+                    {% endif %}
+
+                    {% if success %}
+                    <div class="alert alert-success" role="alert">
+                        {{ success }}
+                    </div>
+                    {% endif %}
+
+                    <form method="post">
+                        <div class="mb-3">
+                            <label for="amount" class="form-label">Amount</label>
+                            <input type="number" class="form-control" id="amount" name="amount"
+                                   value="{{ form_amount }}" required
+                                   placeholder="Positive to add, negative to deduct">
+                            <div class="form-text">
+                                Enter a positive number to add credits, or negative to deduct.
+                                Amount cannot be zero.
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" name="description"
+                                      rows="3" required
+                                      placeholder="Reason for adjustment (required for audit)">{{ form_description }}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fa-solid fa-check"></i> Apply Adjustment
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -7,7 +7,10 @@ from sqladmin import Admin, BaseView, expose
 from starlette.responses import HTMLResponse, JSONResponse
 
 from app.admin.auth import AdminAuth
+from app.admin.credit_balance import CreditBalanceAdmin
+from app.admin.credit_transaction import CreditTransactionAdmin
 from app.admin.dashboard import DashboardView
+from app.admin.purchase_order import PurchaseOrderAdmin
 from app.admin.views import (
     AcceptFailureAdmin,
     AppConfigAdmin,
@@ -100,5 +103,8 @@ def setup_admin(app):
     admin.add_view(AcceptFailureAdmin)
     admin.add_view(RefreshTokenAdmin)
     admin.add_view(AppConfigAdmin)
+    admin.add_view(CreditBalanceAdmin)
+    admin.add_view(CreditTransactionAdmin)
+    admin.add_view(PurchaseOrderAdmin)
 
     return admin
