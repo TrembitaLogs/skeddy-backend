@@ -262,13 +262,13 @@ class TestPingResponse:
             search=False,
             interval_seconds=300,
             force_update=True,
-            update_url="https://skeddy.net/download/search-app.apk",
+            update_url="https://example.com/search-app.apk",
             filters=PingFiltersResponse(min_price=20.0),
         )
         data = resp.model_dump(mode="json")
         assert data["search"] is False
         assert data["force_update"] is True
-        assert data["update_url"] == "https://skeddy.net/download/search-app.apk"
+        assert data["update_url"] == "https://example.com/search-app.apk"
         assert data["interval_seconds"] == 300
 
     def test_force_update_default_false(self):

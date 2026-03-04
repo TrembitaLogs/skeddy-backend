@@ -18,6 +18,7 @@ from app.middleware.logging import setup_logging
 from app.middleware.rate_limiter import setup_rate_limiter
 from app.middleware.request_id import RequestIdMiddleware
 from app.redis import redis_client
+from app.routers.admin_backup import router as admin_backup_router
 from app.routers.admin_config import router as admin_config_router
 from app.routers.auth import router as auth_router
 from app.routers.credits import router as credits_router
@@ -106,8 +107,9 @@ app.add_middleware(RequestIdMiddleware)
 
 setup_rate_limiter(app)
 
-# Admin config API (uses admin session auth, placed after setup_admin)
+# Admin APIs (use admin session auth, placed after setup_admin)
 app.include_router(admin_config_router)
+app.include_router(admin_backup_router)
 
 
 @app.get("/health")

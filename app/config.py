@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # App settings
     DEFAULT_SEARCH_INTERVAL_SECONDS: int = 30
     MIN_SEARCH_APP_VERSION: str = "1.0.0"
-    SEARCH_APP_UPDATE_URL: str = "https://skeddy.net/download/search-app.apk"
+    SEARCH_APP_UPDATE_URL: str = "https://skeddy-search-releases.sfo3.cdn.digitaloceanspaces.com/search/skeddy-search-latest.apk"
 
     # Health Monitor
     HEALTH_CHECK_INTERVAL_MINUTES: int = 5
@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""
     ADMIN_SECRET_KEY: str = ""
+
+    # Backup
+    BACKUP_DIR: str = "/backups"
 
     # Server
     HOST: str = "0.0.0.0"
