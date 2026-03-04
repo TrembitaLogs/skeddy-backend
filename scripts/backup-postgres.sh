@@ -137,7 +137,8 @@ if [ -n "${BACKUP_S3_BUCKET}" ]; then
 
         # Remote retention: remove old backups from S3
         log "Applying remote retention: removing backups older than ${BACKUP_RETENTION_DAYS} days from S3"
-        CUTOFF_DATE=$(date -u -d "-${BACKUP_RETENTION_DAYS} days" +"%Y%m%d" 2>/dev/null || date -u -v-${BACKUP_RETENTION_DAYS}d +"%Y%m%d")
+        CUTOFF_EPOCH=$(($(date +%s) - BACKUP_RETENTION_DAYS * 86400))
+        CUTOFF_DATE=$(date -u -d "@${CUTOFF_EPOCH}" +"%Y%m%d")
         # shellcheck disable=SC2086
         aws s3 ls "s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX}/" ${S3_ENDPOINT_FLAG} 2>/dev/null | while read -r line; do
             REMOTE_FILE=$(echo "${line}" | awk '{print $NF}')
