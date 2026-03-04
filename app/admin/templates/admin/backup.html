@@ -1,0 +1,167 @@
+{% extends "sqladmin/layout.html" %}
+{% block content %}
+<div class="container-fluid">
+    <h2>Database Backups</h2>
+
+    <!-- Last Backup Status -->
+    <div class="row mt-4">
+        <div class="col-xl-6">
+            <div class="card {% if last_status == 'ok' %}border-success{% elif last_status == 'error' %}border-danger{% else %}border-secondary{% endif %}">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        {% if last_status == 'ok' %}
+                            <i class="fa-solid fa-circle-check text-success"></i>
+                        {% elif last_status == 'error' %}
+                            <i class="fa-solid fa-circle-xmark text-danger"></i>
+                        {% else %}
+                            <i class="fa-solid fa-circle-question text-secondary"></i>
+                        {% endif %}
+                        Last Backup
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><th style="width:120px">Status</th><td>
+                            {% if last_status == 'ok' %}
+                                <span class="badge bg-success">OK</span>
+                            {% elif last_status == 'error' %}
+                                <span class="badge bg-danger">Error</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Unknown</span>
+                            {% endif %}
+                        </td></tr>
+                        <tr><th>Time</th><td>{{ last_timestamp }}</td></tr>
+                        <tr><th>File</th><td><code>{{ last_file }}</code></td></tr>
+                        <tr><th>Size</th><td>{{ last_size }}</td></tr>
+                        <tr><th>Duration</th><td>{{ last_duration }}s</td></tr>
+                        {% if last_error %}
+                        <tr><th>Error</th><td class="text-danger">{{ last_error }}</td></tr>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3">
+            <div class="card border-info">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fa-solid fa-hard-drive text-info"></i> Local Storage</h5>
+                </div>
+                <div class="card-body text-center">
+                    <p class="display-6 mb-1">{{ backup_count }}</p>
+                    <p class="text-muted mb-0">backups ({{ total_size }})</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3">
+            <div class="card border-warning">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fa-solid fa-play text-warning"></i> Manual Backup</h5>
+                </div>
+                <div class="card-body text-center">
+                    <button id="btn-trigger" class="btn btn-warning btn-lg" onclick="triggerBackup()">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Backup Now
+                    </button>
+                    <p class="text-muted mt-2 mb-0" id="trigger-msg"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="row mt-4">
+        <div class="col-xl-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fa-solid fa-gear"></i> Backup Settings</h5>
+                </div>
+                <div class="card-body">
+                    <form id="settings-form" onsubmit="saveSettings(event)">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="interval_hours">Backup Interval</label>
+                                <select class="form-select" id="interval_hours" name="interval_hours">
+                                    <option value="1" {% if interval_hours == 1 %}selected{% endif %}>Every 1 hour</option>
+                                    <option value="6" {% if interval_hours == 6 %}selected{% endif %}>Every 6 hours</option>
+                                    <option value="12" {% if interval_hours == 12 %}selected{% endif %}>Every 12 hours</option>
+                                    <option value="24" {% if interval_hours == 24 %}selected{% endif %}>Every 24 hours</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="retention_days">Retention Period</label>
+                                <select class="form-select" id="retention_days" name="retention_days">
+                                    <option value="3" {% if retention_days == 3 %}selected{% endif %}>3 days</option>
+                                    <option value="7" {% if retention_days == 7 %}selected{% endif %}>7 days</option>
+                                    <option value="14" {% if retention_days == 14 %}selected{% endif %}>14 days</option>
+                                    <option value="30" {% if retention_days == 30 %}selected{% endif %}>30 days</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="btn-save">
+                            <i class="fa-solid fa-floppy-disk"></i> Save Settings
+                        </button>
+                        <span id="save-msg" class="ms-2"></span>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function triggerBackup() {
+    const btn = document.getElementById('btn-trigger');
+    const msg = document.getElementById('trigger-msg');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Triggering...';
+    try {
+        const resp = await fetch('/api/admin/backup/trigger', { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok) {
+            msg.className = 'text-success mt-2 mb-0';
+            msg.textContent = data.message;
+        } else {
+            msg.className = 'text-danger mt-2 mb-0';
+            msg.textContent = data.detail || 'Failed to trigger backup';
+        }
+    } catch (e) {
+        msg.className = 'text-danger mt-2 mb-0';
+        msg.textContent = 'Network error';
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Backup Now';
+}
+
+async function saveSettings(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-save');
+    const msg = document.getElementById('save-msg');
+    btn.disabled = true;
+    const body = {
+        interval_hours: parseInt(document.getElementById('interval_hours').value),
+        retention_days: parseInt(document.getElementById('retention_days').value)
+    };
+    try {
+        const resp = await fetch('/api/admin/backup/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (resp.ok) {
+            msg.className = 'text-success';
+            msg.textContent = 'Saved!';
+        } else {
+            const data = await resp.json();
+            msg.className = 'text-danger';
+            msg.textContent = data.detail || 'Failed to save';
+        }
+    } catch (e) {
+        msg.className = 'text-danger';
+        msg.textContent = 'Network error';
+    }
+    btn.disabled = false;
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+}
+</script>
+{% endblock %}
