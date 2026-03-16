@@ -58,8 +58,8 @@ async def test_cascade_delete_on_user_removal(db_session):
     assert result.scalar_one_or_none() is None
 
 
-async def test_paired_at_auto_set_on_creation(db_session):
-    """paired_at is automatically set via server_default when not provided."""
+async def test_registered_at_auto_set_on_creation(db_session):
+    """registered_at is automatically set via server_default when not provided."""
     user = _make_user()
     db_session.add(user)
     await db_session.flush()
@@ -70,7 +70,7 @@ async def test_paired_at_auto_set_on_creation(db_session):
 
     # Refresh to get server-generated value
     await db_session.refresh(device)
-    assert device.paired_at is not None
+    assert device.registered_at is not None
 
 
 async def test_unique_index_on_device_id(db_session):

@@ -156,7 +156,7 @@ async def authenticated_client(app_client):
 
 @pytest_asyncio.fixture
 async def device_headers(authenticated_client):
-    """Pair a test device and provide device auth headers.
+    """Register a search device via search-login and provide device auth headers.
 
     Depends on ``authenticated_client`` — the user is already registered.
 
@@ -169,21 +169,19 @@ async def device_headers(authenticated_client):
         .auth_headers - JWT auth headers for user-authenticated endpoints
     """
     auth = authenticated_client
-
-    gen_resp = await auth.client.post(
-        "/api/v1/pairing/generate",
-        headers=auth.headers,
-    )
-    assert gen_resp.status_code == 201
-    code = gen_resp.json()["code"]
-
     device_id = "fixture-device-001"
-    confirm_resp = await auth.client.post(
-        "/api/v1/pairing/confirm",
-        json={"code": code, "device_id": device_id, "timezone": "America/New_York"},
+
+    login_resp = await auth.client.post(
+        "/api/v1/auth/search-login",
+        json={
+            "email": "fixture@example.com",
+            "password": "securePass1",
+            "device_id": device_id,
+            "timezone": "America/New_York",
+        },
     )
-    assert confirm_resp.status_code == 200
-    data = confirm_resp.json()
+    assert login_resp.status_code == 200
+    data = login_resp.json()
 
     return types.SimpleNamespace(
         headers={"X-Device-Token": data["device_token"], "X-Device-Id": device_id},

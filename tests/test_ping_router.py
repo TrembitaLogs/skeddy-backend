@@ -16,8 +16,7 @@ from app.models.user import User
 
 PING_URL = "/api/v1/ping"
 REGISTER_URL = "/api/v1/auth/register"
-PAIRING_GENERATE_URL = "/api/v1/pairing/generate"
-PAIRING_CONFIRM_URL = "/api/v1/pairing/confirm"
+SEARCH_LOGIN_URL = "/api/v1/auth/search-login"
 SEARCH_START_URL = "/api/v1/search/start"
 
 _TEST_PASSWORD = "securePass1"
@@ -63,18 +62,19 @@ async def _register(app_client, email="ping@example.com"):
     return resp.json()
 
 
-async def _pair_device(app_client, access_token, device_id="ping-device-001"):
-    """Pair a device via generate + confirm flow."""
-    gen_resp = await app_client.post(PAIRING_GENERATE_URL, headers=_jwt(access_token))
-    assert gen_resp.status_code == 201
-    code = gen_resp.json()["code"]
-
-    confirm_resp = await app_client.post(
-        PAIRING_CONFIRM_URL,
-        json={"code": code, "device_id": device_id, "timezone": "America/New_York"},
+async def _pair_device(app_client, email, device_id="ping-device-001"):
+    """Register a search device via search-login endpoint."""
+    resp = await app_client.post(
+        SEARCH_LOGIN_URL,
+        json={
+            "email": email,
+            "password": _TEST_PASSWORD,
+            "device_id": device_id,
+            "timezone": "America/New_York",
+        },
     )
-    assert confirm_resp.status_code == 200
-    return confirm_resp.json()
+    assert resp.status_code == 200
+    return resp.json()
 
 
 def _jwt(token: str) -> dict:
@@ -141,8 +141,8 @@ async def test_ping_invalid_device_token_returns_401(app_client):
 
 async def test_ping_invalid_timezone_returns_422(app_client):
     """POST /ping with invalid IANA timezone -> 422."""
-    reg = await _register(app_client, email="tz@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-dev")
+    await _register(app_client, email="tz@example.com")
+    pairing = await _pair_device(app_client, "tz@example.com", device_id="tz-dev")
 
     resp = await app_client.post(
         PING_URL,
@@ -163,7 +163,7 @@ async def test_ping_outdated_version_returns_force_update(app_client, db_session
     Also verifies device state is updated BEFORE the version check (PRD order).
     """
     reg = await _register(app_client, email="ver@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ver-dev")
+    pairing = await _pair_device(app_client, "ver@example.com", device_id="ver-dev")
 
     resp = await app_client.post(
         PING_URL,
@@ -193,8 +193,8 @@ async def test_ping_outdated_version_returns_force_update(app_client, db_session
 
 async def test_ping_inactive_returns_search_false(app_client):
     """POST /ping with is_active=false (default) -> search=false, interval=60."""
-    reg = await _register(app_client, email="inactive@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="inactive-dev")
+    await _register(app_client, email="inactive@example.com")
+    pairing = await _pair_device(app_client, "inactive@example.com", device_id="inactive-dev")
     # is_active defaults to false after registration — no start_search call
 
     resp = await app_client.post(
@@ -219,7 +219,7 @@ async def test_ping_inactive_returns_search_false(app_client):
 async def test_ping_outside_schedule_returns_search_false(app_client, db_session):
     """POST /ping when is_active but outside working hours -> search=false."""
     reg = await _register(app_client, email="outside@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="outside-dev")
+    pairing = await _pair_device(app_client, "outside@example.com", device_id="outside-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
@@ -255,7 +255,7 @@ async def test_ping_outside_schedule_returns_search_false(app_client, db_session
 async def test_ping_within_schedule_returns_search_true(app_client, db_session):
     """POST /ping when is_active and within working hours -> search=true."""
     reg = await _register(app_client, email="within@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="within-dev")
+    pairing = await _pair_device(app_client, "within@example.com", device_id="within-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
@@ -293,7 +293,7 @@ async def test_ping_within_schedule_returns_search_true(app_client, db_session):
 async def test_ping_overnight_schedule_returns_search_true(app_client, db_session):
     """POST /ping during overnight shift (started yesterday) -> search=true."""
     reg = await _register(app_client, email="overnight@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="overnight-dev")
+    pairing = await _pair_device(app_client, "overnight@example.com", device_id="overnight-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
@@ -327,7 +327,7 @@ async def test_ping_overnight_schedule_returns_search_true(app_client, db_sessio
 async def test_ping_batch_dedup_first_saves_second_skips(app_client, db_session):
     """Two pings with same batch_id -> only first saves accept_failures."""
     reg = await _register(app_client, email="dedup@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="dedup-dev")
+    pairing = await _pair_device(app_client, "dedup@example.com", device_id="dedup-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     # Default filters: working_time=24, all days → always within schedule
@@ -379,7 +379,7 @@ async def test_ping_batch_dedup_first_saves_second_skips(app_client, db_session)
 async def test_ping_updates_device_state(app_client, db_session):
     """POST /ping updates last_ping_at, timezone, and device_health in DB."""
     reg = await _register(app_client, email="state@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="state-dev")
+    pairing = await _pair_device(app_client, "state@example.com", device_id="state-dev")
 
     resp = await app_client.post(
         PING_URL,
@@ -414,7 +414,7 @@ async def test_ping_updates_device_state(app_client, db_session):
 async def test_ping_happy_path_complete_response(app_client, db_session):
     """POST /ping with all fields -> correct response + device state updated."""
     reg = await _register(app_client, email="happy@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="happy-dev")
+    pairing = await _pair_device(app_client, "happy@example.com", device_id="happy-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     # Default filters: working_time=24, all days, min_price=20.0
@@ -467,7 +467,7 @@ async def test_ping_e2e_flow(app_client, db_session):
     reg = await _register(app_client, email="e2e@example.com")
 
     # 2. Pair device
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="e2e-dev")
+    pairing = await _pair_device(app_client, "e2e@example.com", device_id="e2e-dev")
 
     # 3. First ping — search not started → search=false
     resp1 = await app_client.post(
@@ -507,7 +507,7 @@ async def test_ping_e2e_flow(app_client, db_session):
 async def test_ping_concurrent_no_duplicate_failures(app_client, db_session):
     """Three pings with same batch_id -> only 2 failures saved (from first ping)."""
     reg = await _register(app_client, email="concurrent@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="concurrent-dev")
+    pairing = await _pair_device(app_client, "concurrent@example.com", device_id="concurrent-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
@@ -562,7 +562,7 @@ async def test_ping_non_working_day_returns_search_false(app_client, db_session)
     is not in working_days, so search must be false.
     """
     reg = await _register(app_client, email="workdays@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="workdays-dev")
+    pairing = await _pair_device(app_client, "workdays@example.com", device_id="workdays-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
 
@@ -632,7 +632,7 @@ async def _seed_interval_configs(db_session):
 async def test_ping_dynamic_interval_peak_hour(app_client, db_session):
     """POST /ping at peak hour with interval config -> dynamic interval_seconds."""
     reg = await _register(app_client, email="dynamic@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="dynamic-dev")
+    pairing = await _pair_device(app_client, "dynamic@example.com", device_id="dynamic-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     await _seed_interval_configs(db_session)
@@ -661,7 +661,7 @@ async def test_ping_dynamic_interval_peak_hour(app_client, db_session):
 async def test_ping_dynamic_interval_off_peak_hour(app_client, db_session):
     """POST /ping at off-peak hour with interval config -> longer interval."""
     reg = await _register(app_client, email="offpeak@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="offpeak-dev")
+    pairing = await _pair_device(app_client, "offpeak@example.com", device_id="offpeak-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     await _seed_interval_configs(db_session)
@@ -690,7 +690,7 @@ async def test_ping_dynamic_interval_off_peak_hour(app_client, db_session):
 async def test_ping_no_interval_config_falls_back_to_default(app_client, db_session):
     """POST /ping without interval config -> default 30s interval."""
     reg = await _register(app_client, email="fallback@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="fallback-dev")
+    pairing = await _pair_device(app_client, "fallback@example.com", device_id="fallback-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     # No _seed_interval_configs call -> fallback behavior
@@ -715,7 +715,7 @@ async def test_ping_no_interval_config_falls_back_to_default(app_client, db_sess
 async def test_ping_ride_statuses_present_false(app_client, db_session):
     """POST /ping with ride_statuses present=false → ride tracking fields updated."""
     reg = await _register(app_client, email="ridestatus@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ridestatus-dev")
+    pairing = await _pair_device(app_client, "ridestatus@example.com", device_id="ridestatus-dev")
     user_id = UUID(reg["user_id"])
 
     # Create a ride directly in DB
@@ -755,7 +755,9 @@ async def test_ping_ride_statuses_present_false(app_client, db_session):
 async def test_ping_ride_statuses_present_true(app_client, db_session):
     """POST /ping with ride_statuses present=true → last_reported_present=true, no disappeared_at."""
     reg = await _register(app_client, email="ridestatus2@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ridestatus2-dev")
+    pairing = await _pair_device(
+        app_client, "ridestatus2@example.com", device_id="ridestatus2-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     ride = Ride(
@@ -791,8 +793,10 @@ async def test_ping_ride_statuses_present_true(app_client, db_session):
 
 async def test_ping_ride_statuses_unknown_hash_no_error(app_client):
     """POST /ping with unknown ride_hash in ride_statuses → 200 OK, no crash."""
-    reg = await _register(app_client, email="ridestatus3@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ridestatus3-dev")
+    await _register(app_client, email="ridestatus3@example.com")
+    pairing = await _pair_device(
+        app_client, "ridestatus3@example.com", device_id="ridestatus3-dev"
+    )
 
     resp = await app_client.post(
         PING_URL,
@@ -812,7 +816,7 @@ async def test_ping_ride_statuses_unknown_hash_no_error(app_client):
 async def test_ping_cancelled_ride_sends_fcm_refund_push(app_client, db_session):
     """POST /ping with expired PENDING ride (present=false) → FCM RIDE_CREDIT_REFUNDED sent."""
     reg = await _register(app_client, email="refundpush@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="refundpush-dev")
+    pairing = await _pair_device(app_client, "refundpush@example.com", device_id="refundpush-dev")
     user_id = UUID(reg["user_id"])
 
     # Create a ride with expired deadline and last_reported_present=False
@@ -865,7 +869,7 @@ async def test_ping_cancelled_ride_sends_fcm_refund_push(app_client, db_session)
 async def test_ping_fcm_failure_does_not_block_refund(app_client, db_session):
     """FCM push failure during refund does not prevent the ride from being CANCELLED."""
     reg = await _register(app_client, email="fcmfail@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="fcmfail-dev")
+    pairing = await _pair_device(app_client, "fcmfail@example.com", device_id="fcmfail-dev")
     user_id = UUID(reg["user_id"])
 
     ride = Ride(
@@ -910,7 +914,7 @@ async def test_ping_fcm_failure_does_not_block_refund(app_client, db_session):
 async def test_ping_confirmed_ride_no_fcm_refund_push(app_client, db_session):
     """POST /ping with expired PENDING ride (present=true) → no FCM refund push."""
     reg = await _register(app_client, email="nofcm@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="nofcm-dev")
+    pairing = await _pair_device(app_client, "nofcm@example.com", device_id="nofcm-dev")
     user_id = UUID(reg["user_id"])
 
     ride = Ride(
@@ -950,7 +954,7 @@ async def test_ping_confirmed_ride_no_fcm_refund_push(app_client, db_session):
 async def test_ping_zero_balance_returns_no_credits(app_client, db_session, fake_redis):
     """POST /ping with zero credit balance → search=false, reason=NO_CREDITS."""
     reg = await _register(app_client, email="nocredit@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="nocredit-dev")
+    pairing = await _pair_device(app_client, "nocredit@example.com", device_id="nocredit-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     user_id = UUID(reg["user_id"])
@@ -986,7 +990,7 @@ async def test_ping_zero_balance_returns_no_credits(app_client, db_session, fake
 async def test_ping_positive_balance_no_reason(app_client, db_session):
     """POST /ping with positive balance → reason is null, search determined by schedule."""
     reg = await _register(app_client, email="hascredit@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="hascredit-dev")
+    pairing = await _pair_device(app_client, "hascredit@example.com", device_id="hascredit-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     # Default: balance=10 (registration bonus), 24h schedule → search=true
@@ -1011,7 +1015,9 @@ async def test_ping_positive_balance_no_reason(app_client, db_session):
 async def test_ping_no_credits_still_sends_verify_rides(app_client, db_session, fake_redis):
     """POST /ping with zero balance and PENDING ride → verify_rides still included."""
     reg = await _register(app_client, email="vr-nocredit@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="vr-nocredit-dev")
+    pairing = await _pair_device(
+        app_client, "vr-nocredit@example.com", device_id="vr-nocredit-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     # Create a PENDING ride with future deadline (should appear in verify_rides)
@@ -1072,7 +1078,7 @@ async def test_ping_inactive_with_zero_balance_no_reason(app_client, db_session,
     """
     reg = await _register(app_client, email="inactive-nocredit@example.com")
     pairing = await _pair_device(
-        app_client, reg["access_token"], device_id="inactive-nocredit-dev"
+        app_client, "inactive-nocredit@example.com", device_id="inactive-nocredit-dev"
     )
     user_id = UUID(reg["user_id"])
     # is_active defaults to false — do NOT call _start_search
@@ -1108,7 +1114,7 @@ async def test_ping_inactive_with_zero_balance_no_reason(app_client, db_session,
 async def test_ping_balance_from_redis_cache(app_client, db_session, fake_redis):
     """POST /ping reads balance from Redis cache (set by write-through)."""
     reg = await _register(app_client, email="rediscache@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="rediscache-dev")
+    pairing = await _pair_device(app_client, "rediscache@example.com", device_id="rediscache-dev")
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     user_id = UUID(reg["user_id"])
@@ -1150,7 +1156,9 @@ async def test_ping_zero_balance_still_processes_ride_statuses(app_client, db_se
     Per PRD section 7: ride verification continues regardless of balance.
     """
     reg = await _register(app_client, email="rs-nocredit@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="rs-nocredit-dev")
+    pairing = await _pair_device(
+        app_client, "rs-nocredit@example.com", device_id="rs-nocredit-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     # Create a ride to report status on
@@ -1207,7 +1215,9 @@ async def test_ping_zero_balance_still_processes_expired_verifications(app_clien
     Per PRD section 7: verification continues regardless of balance.
     """
     reg = await _register(app_client, email="exp-nocredit@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="exp-nocredit-dev")
+    pairing = await _pair_device(
+        app_client, "exp-nocredit@example.com", device_id="exp-nocredit-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     # Create expired PENDING ride with present=false → should be CANCELLED

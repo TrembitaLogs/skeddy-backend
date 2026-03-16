@@ -1,62 +1,37 @@
 import hashlib
 import logging
-from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from redis.asyncio import Redis
-from redis.exceptions import RedisError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.accept_failure import AcceptFailure
 from app.models.paired_device import PairedDevice
+from app.models.user import User
+from app.services.auth_service import verify_password
 from app.services.ping_service import validate_timezone
-from app.utils.codes import generate_six_digit_code
 
 logger = logging.getLogger(__name__)
 
-PAIRING_CODE_TTL = 300  # 5 minutes
+# Pre-computed bcrypt hash for timing-safe login verification.
+# When user is not found, we still run bcrypt.checkpw against this
+# dummy hash to prevent email enumeration via response time differences.
+_DUMMY_HASH: str | None = None
 
 
-async def generate_pairing_code(redis: Redis, user_id: UUID) -> tuple[str, datetime]:
-    """Generate a 6-digit pairing code and store it in Redis with 5-minute TTL.
+def _get_dummy_hash() -> str:
+    """Lazy-init the dummy hash to avoid import-time bcrypt call."""
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        from app.services.auth_service import hash_password
 
-    Invalidates any previous unused code for the same user before generating
-    a new one. Stores a reverse mapping ``user_pairing:{user_id}`` → code so
-    that the old code can be looked up and deleted on subsequent calls.
-
-    Returns:
-        Tuple of (code, expires_at).
-
-    Raises:
-        HTTPException(503): If Redis is unavailable.
-    """
-    try:
-        # Invalidate previous code for this user (if any)
-        reverse_key = f"user_pairing:{user_id}"
-        old_code = await redis.get(reverse_key)
-        if old_code:
-            await redis.delete(f"pairing_code:{old_code}")
-
-        code = generate_six_digit_code()
-
-        # Store code → user_id mapping
-        await redis.setex(f"pairing_code:{code}", PAIRING_CODE_TTL, str(user_id))
-
-        # Store reverse mapping user_id → code (for future invalidation)
-        await redis.setex(reverse_key, PAIRING_CODE_TTL, code)
-
-        expires_at = datetime.now(UTC) + timedelta(seconds=PAIRING_CODE_TTL)
-        return code, expires_at
-
-    except RedisError as exc:
-        logger.error("Redis unavailable during pairing code generation: %s", exc)
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE") from exc
+        _DUMMY_HASH = hash_password("timing-safe-dummy")
+    return _DUMMY_HASH
 
 
 # ---------------------------------------------------------------------------
-# confirm_pairing helpers
+# Device CRUD helpers
 # ---------------------------------------------------------------------------
 
 
@@ -104,66 +79,60 @@ async def create_paired_device(
 
 
 # ---------------------------------------------------------------------------
-# confirm_pairing
+# search_login — email/password auth for Search App
 # ---------------------------------------------------------------------------
 
 
-async def confirm_pairing(
-    code: str,
+async def search_login(
+    email: str,
+    password: str,
     device_id: str,
     timezone_str: str,
-    redis: Redis,
     db: AsyncSession,
     device_model: str | None = None,
 ) -> tuple[str, UUID]:
-    """Confirm pairing: validate code, clean up old devices, create new pairing.
+    """Authenticate user with email/password and register the search device.
+
+    Handles device replacement: if the user already has a paired device with a
+    different device_id, the old record is deleted. If the device_id is already
+    registered to another user, that old record is also deleted.
 
     Returns:
         Tuple of (device_token, user_id).
 
     Raises:
         HTTPException(422): If timezone is invalid (INVALID_TIMEZONE).
-        HTTPException(404): If pairing code is invalid or expired (PAIRING_CODE_EXPIRED).
-        HTTPException(409): If pairing code was already used (PAIRING_CODE_USED).
-        HTTPException(503): If Redis is unavailable.
+        HTTPException(401): If credentials are invalid (INVALID_CREDENTIALS).
     """
     # 1. Validate timezone (IANA format)
     validate_timezone(timezone_str)
 
-    # 2. Get user_id from Redis, check used codes, delete code
-    try:
-        user_id_str = await redis.get(f"pairing_code:{code}")
-        if not user_id_str:
-            # Check if code was already used
-            if await redis.exists(f"used_pairing_code:{code}"):
-                raise HTTPException(status_code=409, detail="PAIRING_CODE_USED")
-            raise HTTPException(status_code=404, detail="PAIRING_CODE_EXPIRED")
-        await redis.delete(f"pairing_code:{code}")
-        # Mark code as used (same TTL) to detect replay attempts
-        await redis.setex(f"used_pairing_code:{code}", PAIRING_CODE_TTL, "1")
-    except RedisError as exc:
-        logger.error("Redis unavailable during pairing confirmation: %s", exc)
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE") from exc
+    # 2. Authenticate user (email + password)
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
 
-    user_id = UUID(user_id_str)
+    # Always run bcrypt verify to prevent timing-based email enumeration
+    password_valid = verify_password(password, user.password_hash if user else _get_dummy_hash())
+    if not user or not password_valid:
+        raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
 
     # 3. If device_id already paired to another user, delete old pairing
     existing_device = await get_device_by_device_id(db, device_id)
-    if existing_device:
+    if existing_device and existing_device.user_id != user.id:
         await delete_paired_device(db, existing_device.id)
 
     # 4. Delete old device for this user if exists (1 user = 1 device)
-    old_device = await get_device_by_user_id(db, user_id)
+    old_device = await get_device_by_user_id(db, user.id)
     if old_device:
         await delete_paired_device(db, old_device.id)
-        await delete_accept_failures(db, user_id)
+        await delete_accept_failures(db, user.id)
 
     # 5. Generate device token with SHA256 hash
     device_token = str(uuid4())
     token_hash = hashlib.sha256(device_token.encode()).hexdigest()
 
     # 6. Create new paired device record
-    await create_paired_device(db, user_id, device_id, token_hash, timezone_str, device_model)
+    await create_paired_device(db, user.id, device_id, token_hash, timezone_str, device_model)
     await db.commit()
 
-    return device_token, user_id
+    return device_token, user.id

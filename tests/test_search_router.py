@@ -12,8 +12,7 @@ SEARCH_STOP_URL = "/api/v1/search/stop"
 SEARCH_STATUS_URL = "/api/v1/search/status"
 DEVICE_OVERRIDE_URL = "/api/v1/search/device-override"
 REGISTER_URL = "/api/v1/auth/register"
-PAIRING_GENERATE_URL = "/api/v1/pairing/generate"
-PAIRING_CONFIRM_URL = "/api/v1/pairing/confirm"
+SEARCH_LOGIN_URL = "/api/v1/auth/search-login"
 
 _TEST_PASSWORD = "securePass1"
 
@@ -28,21 +27,19 @@ async def _register_and_get_tokens(app_client, email="search@example.com"):
     return response.json()
 
 
-async def _pair_device(app_client, access_token, device_id="test-device-001"):
-    """Helper: pair a device via generate + confirm flow."""
-    gen_resp = await app_client.post(
-        PAIRING_GENERATE_URL,
-        headers=_auth_header(access_token),
+async def _pair_device(app_client, email, device_id="test-device-001"):
+    """Helper: register a search device via search-login endpoint."""
+    resp = await app_client.post(
+        SEARCH_LOGIN_URL,
+        json={
+            "email": email,
+            "password": _TEST_PASSWORD,
+            "device_id": device_id,
+            "timezone": "America/New_York",
+        },
     )
-    assert gen_resp.status_code == 201
-    code = gen_resp.json()["code"]
-
-    confirm_resp = await app_client.post(
-        PAIRING_CONFIRM_URL,
-        json={"code": code, "device_id": device_id, "timezone": "America/New_York"},
-    )
-    assert confirm_resp.status_code == 200
-    return confirm_resp.json()
+    assert resp.status_code == 200
+    return resp.json()
 
 
 def _auth_header(access_token: str) -> dict:
@@ -107,7 +104,7 @@ async def test_start_search_returns_ok(app_client, db_session):
     """POST /search/start with paired device -> 200 {"ok": true}."""
     reg = await _register_and_get_tokens(app_client, email="start@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "start@example.com")
 
     response = await app_client.post(
         SEARCH_START_URL,
@@ -125,7 +122,7 @@ async def test_start_search_twice_is_idempotent(app_client, db_session):
     """POST /search/start called twice -> both return 200."""
     reg = await _register_and_get_tokens(app_client, email="twice@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "twice@example.com")
     headers = _auth_header(reg["access_token"])
 
     resp1 = await app_client.post(SEARCH_START_URL, headers=headers)
@@ -185,7 +182,7 @@ async def test_status_without_device_returns_offline(app_client):
 async def test_status_with_recent_ping_is_online(app_client, db_session):
     """GET /search/status with device pinged 10s ago -> is_online=True."""
     reg = await _register_and_get_tokens(app_client, email="online@example.com")
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "online@example.com")
 
     # Set last_ping_at to 10 seconds ago directly in DB
     user_id = UUID(reg["user_id"])
@@ -211,7 +208,7 @@ async def test_status_with_recent_ping_is_online(app_client, db_session):
 async def test_status_with_stale_ping_is_offline(app_client, db_session):
     """GET /search/status with device pinged 2 min ago -> is_online=False."""
     reg = await _register_and_get_tokens(app_client, email="stale@example.com")
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "stale@example.com")
 
     # Set last_ping_at to 2 minutes ago
     user_id = UUID(reg["user_id"])
@@ -238,7 +235,7 @@ async def test_start_then_status_shows_active(app_client, db_session):
     """POST /search/start then GET /search/status -> is_active=True."""
     reg = await _register_and_get_tokens(app_client, email="active@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "active@example.com")
     headers = _auth_header(reg["access_token"])
 
     await app_client.post(SEARCH_START_URL, headers=headers)
@@ -256,7 +253,7 @@ async def test_start_then_stop_then_status_shows_inactive(app_client, db_session
     """POST /search/start then /stop then GET /search/status -> is_active=False."""
     reg = await _register_and_get_tokens(app_client, email="inactive@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "inactive@example.com")
     headers = _auth_header(reg["access_token"])
 
     await app_client.post(SEARCH_START_URL, headers=headers)
@@ -301,8 +298,10 @@ async def test_device_override_with_invalid_token_returns_401(app_client):
 
 async def test_device_override_active_true_returns_ok(app_client):
     """POST /search/device-override with valid device, active=True -> 200."""
-    reg = await _register_and_get_tokens(app_client, email="devoverride1@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="override-dev-001")
+    await _register_and_get_tokens(app_client, email="devoverride1@example.com")
+    pairing = await _pair_device(
+        app_client, "devoverride1@example.com", device_id="override-dev-001"
+    )
 
     response = await app_client.post(
         DEVICE_OVERRIDE_URL,
@@ -319,8 +318,10 @@ async def test_device_override_active_true_returns_ok(app_client):
 
 async def test_device_override_active_false_returns_ok(app_client):
     """POST /search/device-override with valid device, active=False -> 200."""
-    reg = await _register_and_get_tokens(app_client, email="devoverride2@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="override-dev-002")
+    await _register_and_get_tokens(app_client, email="devoverride2@example.com")
+    pairing = await _pair_device(
+        app_client, "devoverride2@example.com", device_id="override-dev-002"
+    )
 
     response = await app_client.post(
         DEVICE_OVERRIDE_URL,
@@ -338,7 +339,9 @@ async def test_device_override_active_false_returns_ok(app_client):
 async def test_device_override_updates_is_active_in_db(app_client):
     """POST /search/device-override changes is_active, verified via GET /search/status."""
     reg = await _register_and_get_tokens(app_client, email="devoverride3@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="override-dev-003")
+    pairing = await _pair_device(
+        app_client, "devoverride3@example.com", device_id="override-dev-003"
+    )
     dev_hdrs = _device_headers(pairing["device_token"], "override-dev-003")
     jwt_hdrs = _auth_header(reg["access_token"])
 
@@ -362,8 +365,10 @@ async def test_device_override_updates_is_active_in_db(app_client):
 
 async def test_device_override_idempotent(app_client):
     """POST /search/device-override called twice with same value -> both 200."""
-    reg = await _register_and_get_tokens(app_client, email="devoverride4@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="override-dev-004")
+    await _register_and_get_tokens(app_client, email="devoverride4@example.com")
+    pairing = await _pair_device(
+        app_client, "devoverride4@example.com", device_id="override-dev-004"
+    )
     dev_hdrs = _device_headers(pairing["device_token"], "override-dev-004")
 
     resp1 = await app_client.post(DEVICE_OVERRIDE_URL, json={"active": True}, headers=dev_hdrs)
@@ -392,7 +397,7 @@ async def test_status_force_update_false_without_device(app_client):
 async def test_status_force_update_false_when_version_ok(app_client, db_session):
     """GET /search/status with current app_version -> force_update=False."""
     reg = await _register_and_get_tokens(app_client, email="fu_ok@example.com")
-    await _pair_device(app_client, reg["access_token"], device_id="fu-ok-dev")
+    await _pair_device(app_client, "fu_ok@example.com", device_id="fu-ok-dev")
 
     user_id = UUID(reg["user_id"])
     result = await db_session.execute(select(PairedDevice).where(PairedDevice.user_id == user_id))
@@ -412,7 +417,7 @@ async def test_status_force_update_false_when_version_ok(app_client, db_session)
 async def test_status_force_update_true_when_outdated(app_client, db_session):
     """GET /search/status with outdated app_version -> force_update=True."""
     reg = await _register_and_get_tokens(app_client, email="fu_old@example.com")
-    await _pair_device(app_client, reg["access_token"], device_id="fu-old-dev")
+    await _pair_device(app_client, "fu_old@example.com", device_id="fu-old-dev")
 
     user_id = UUID(reg["user_id"])
     result = await db_session.execute(select(PairedDevice).where(PairedDevice.user_id == user_id))
@@ -432,7 +437,7 @@ async def test_status_force_update_true_when_outdated(app_client, db_session):
 async def test_status_force_update_false_when_no_version(app_client, db_session):
     """GET /search/status with app_version=None (never pinged) -> force_update=False."""
     reg = await _register_and_get_tokens(app_client, email="fu_none@example.com")
-    await _pair_device(app_client, reg["access_token"], device_id="fu-none-dev")
+    await _pair_device(app_client, "fu_none@example.com", device_id="fu-none-dev")
 
     response = await app_client.get(
         SEARCH_STATUS_URL,
@@ -491,7 +496,7 @@ async def test_start_search_verified_user_with_device_returns_ok(app_client, db_
     """Verified user with paired device -> POST /search/start -> 200 {"ok": true}."""
     reg = await _register_and_get_tokens(app_client, email="verified_ok@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "verified_ok@example.com")
 
     response = await app_client.post(
         SEARCH_START_URL,
@@ -537,7 +542,7 @@ async def test_start_search_with_zero_balance_returns_403(app_client, db_session
     """POST /search/start with balance=0 -> 403 INSUFFICIENT_CREDITS."""
     reg = await _register_and_get_tokens(app_client, email="zerocredits@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "zerocredits@example.com")
     await _set_balance_in_db(db_session, reg["user_id"], 0, fake_redis)
 
     response = await app_client.post(
@@ -553,7 +558,7 @@ async def test_start_search_with_positive_balance_passes(app_client, db_session)
     """POST /search/start with balance>0 -> passes balance check (200 OK)."""
     reg = await _register_and_get_tokens(app_client, email="hascredits@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "hascredits@example.com")
     # Registration bonus gives 10 credits — no need to modify balance
 
     response = await app_client.post(
@@ -584,7 +589,7 @@ async def test_start_search_redis_cache_miss_falls_back_to_db(app_client, db_ses
     """POST /search/start reads balance from DB when Redis cache is empty."""
     reg = await _register_and_get_tokens(app_client, email="redisfallback@example.com")
     await _verify_email_in_db(db_session, reg["user_id"])
-    await _pair_device(app_client, reg["access_token"])
+    await _pair_device(app_client, "redisfallback@example.com")
 
     # Clear any cached balance from Redis to force DB fallback
     cache_key = f"user_balance:{reg['user_id']}"

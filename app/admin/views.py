@@ -144,14 +144,14 @@ class PairedDeviceAdmin(ModelView, model=PairedDevice):
         PairedDevice.id,
         PairedDevice.user_id,
         PairedDevice.device_id,
-        PairedDevice.paired_at,
+        PairedDevice.registered_at,
         PairedDevice.last_ping_at,
         PairedDevice.timezone,
     ]
 
     column_searchable_list: ClassVar = [PairedDevice.device_id]
 
-    column_sortable_list: ClassVar = [PairedDevice.paired_at, PairedDevice.last_ping_at]
+    column_sortable_list: ClassVar = [PairedDevice.registered_at, PairedDevice.last_ping_at]
 
     # Hide sensitive token hash from details view
     column_details_exclude_list: ClassVar = [PairedDevice.device_token_hash]
