@@ -115,9 +115,9 @@ class TestRefreshTokenAdmin:
 class TestRideAdmin:
     """Tests for RideAdmin ModelView configuration."""
 
-    def test_can_create_is_false(self):
-        """Test that RideAdmin has can_create=False."""
-        assert RideAdmin.can_create is False
+    def test_can_create_is_true(self):
+        """Test that RideAdmin allows creation via admin."""
+        assert RideAdmin.can_create is True
 
 
 class TestAcceptFailureAdmin:

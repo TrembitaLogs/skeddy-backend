@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from sqladmin import ModelView
 from starlette.requests import Request
-from wtforms import PasswordField, TextAreaField
+from wtforms import Form, PasswordField, TextAreaField
 
 from app.models.accept_failure import AcceptFailure
 from app.models.app_config import AppConfig
@@ -125,17 +125,21 @@ class UserAdmin(ModelView, model=User):
         User.search_status,
         User.rides,
         User.accept_failures,
+        User.credit_balance,
+        User.credit_transactions,
+        User.purchase_orders,
     ]
-
-    # Add a plain-text password field for user creation/edit
-    form_extra_fields: ClassVar = {
-        "password": PasswordField("Password"),
-    }
 
     # Allow creating users via admin panel
     can_create = True
     can_delete = True
     can_edit = True
+
+    async def scaffold_form(self, rules: list[str] | None = None) -> type[Form]:
+        """Add a Password field to the generated form."""
+        form = await super().scaffold_form(rules)
+        form.password = PasswordField("Password")
+        return form
 
     async def on_model_change(
         self, data: dict[str, Any], model: User, is_created: bool, request: Request
@@ -240,8 +244,7 @@ class RideAdmin(ModelView, model=Ride):
 
     column_default_sort: ClassVar = [(Ride.created_at, True)]
 
-    # Rides are created via API
-    can_create = False
+    can_create = True
     can_edit = True
     can_delete = True
 
