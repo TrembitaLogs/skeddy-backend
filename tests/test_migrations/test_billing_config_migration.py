@@ -149,8 +149,13 @@ def test_upgrade_idempotent_no_duplicates():
 
 
 def test_downgrade_removes_only_billing_keys():
-    """Running alembic downgrade -1 removes billing keys but keeps pre-existing ones."""
-    _run_alembic("downgrade", "-1")
+    """Running alembic downgrade to pre-billing revision removes billing keys but keeps pre-existing ones."""
+    # Ensure we are at HEAD first (no-op if already there from previous tests,
+    # but necessary when this test is run in isolation).
+    _run_alembic("upgrade", "head")
+    # Downgrade to the revision just before e5b3f1a82d09 (billing seed),
+    # not just -1 from HEAD, because newer migrations may sit after it.
+    _run_alembic("downgrade", "d7f2a8b31c04")
 
     configs = _get_app_config_keys()
 

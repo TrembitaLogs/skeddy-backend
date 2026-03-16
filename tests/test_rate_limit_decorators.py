@@ -6,7 +6,7 @@ Test strategy (adapted from API Contract):
 3. POST /ping enforces 12 req/min per device (X-Device-ID)
 4. POST /ping from different devices have separate counters
 5. POST /rides enforces 30 req/min per device
-6. POST /pairing/confirm enforces 5 req/min per IP
+6. POST /auth/search-login enforces 5 req/min per IP
 7. "Other" endpoints enforce 60 req/min per user (Authorization header)
 8. All 429 responses use unified error format
 
@@ -74,10 +74,10 @@ def _create_rate_limit_app() -> FastAPI:
     async def rides(request: Request, response: Response):
         return {"ok": True}
 
-    # --- Pairing confirm: 5/minute per IP ---
-    @app.post("/pairing/confirm")
+    # --- Search login: 5/minute per IP ---
+    @app.post("/auth/search-login")
     @test_limiter.limit("5/minute")
-    async def pairing_confirm(request: Request, response: Response):
+    async def search_login(request: Request, response: Response):
         return {"ok": True}
 
     # --- "Other" endpoints: 60/minute per user ---
@@ -197,17 +197,17 @@ async def test_rides_allows_30_requests_per_device(rate_client):
     assert r.status_code == 429
 
 
-# ─── Test 6: POST /pairing/confirm enforces 5/minute per IP ───
+# ─── Test 6: POST /auth/search-login enforces 5/minute per IP ───
 
 
 @pytest.mark.asyncio
-async def test_pairing_confirm_allows_5_requests_per_minute(rate_client):
-    """POST /pairing/confirm allows 5 requests, 6th returns 429."""
+async def test_search_login_allows_5_requests_per_minute(rate_client):
+    """POST /auth/search-login allows 5 requests, 6th returns 429."""
     for _ in range(5):
-        r = await rate_client.post("/pairing/confirm")
+        r = await rate_client.post("/auth/search-login")
         assert r.status_code == 200
 
-    r = await rate_client.post("/pairing/confirm")
+    r = await rate_client.post("/auth/search-login")
     assert r.status_code == 429
 
 

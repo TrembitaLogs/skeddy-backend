@@ -92,6 +92,7 @@ async def get_status(
         last_ping_at=last_ping_at,
         credits_balance=balance,
         force_update=force_update,
+        paired=device is not None,
     )
 
 

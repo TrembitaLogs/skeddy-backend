@@ -24,6 +24,7 @@ class SearchStatusResponse(BaseModel):
     last_ping_at: datetime | None
     credits_balance: int
     force_update: bool = False
+    paired: bool = False
 
 
 class DeviceOverrideRequest(BaseModel):

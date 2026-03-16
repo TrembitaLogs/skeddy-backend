@@ -24,7 +24,6 @@ from app.routers.auth import router as auth_router
 from app.routers.credits import router as credits_router
 from app.routers.fcm import router as fcm_router
 from app.routers.filters import router as filters_router
-from app.routers.pairing import router as pairing_router
 from app.routers.ping import router as ping_router
 from app.routers.rides import router as rides_router
 from app.routers.search import router as search_router
@@ -144,7 +143,6 @@ v1_router.include_router(auth_router)
 v1_router.include_router(credits_router)
 v1_router.include_router(fcm_router)
 v1_router.include_router(filters_router)
-v1_router.include_router(pairing_router)
 v1_router.include_router(ping_router)
 v1_router.include_router(rides_router)
 v1_router.include_router(search_router)

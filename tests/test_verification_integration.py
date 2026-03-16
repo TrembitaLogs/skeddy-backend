@@ -28,8 +28,7 @@ from app.models.user import User
 PING_URL = "/api/v1/ping"
 RIDES_URL = "/api/v1/rides"
 REGISTER_URL = "/api/v1/auth/register"
-PAIRING_GENERATE_URL = "/api/v1/pairing/generate"
-PAIRING_CONFIRM_URL = "/api/v1/pairing/confirm"
+SEARCH_LOGIN_URL = "/api/v1/auth/search-login"
 SEARCH_START_URL = "/api/v1/search/start"
 
 _TEST_PASSWORD = "securePass1"
@@ -46,19 +45,19 @@ async def _register(app_client, email):
     return resp.json()
 
 
-async def _pair_device(app_client, access_token, device_id):
-    gen_resp = await app_client.post(
-        PAIRING_GENERATE_URL, headers={"Authorization": f"Bearer {access_token}"}
+async def _pair_device(app_client, email, device_id):
+    """Register a search device via search-login endpoint."""
+    resp = await app_client.post(
+        SEARCH_LOGIN_URL,
+        json={
+            "email": email,
+            "password": _TEST_PASSWORD,
+            "device_id": device_id,
+            "timezone": "America/New_York",
+        },
     )
-    assert gen_resp.status_code == 201
-    code = gen_resp.json()["code"]
-
-    confirm_resp = await app_client.post(
-        PAIRING_CONFIRM_URL,
-        json={"code": code, "device_id": device_id, "timezone": "America/New_York"},
-    )
-    assert confirm_resp.status_code == 200
-    return confirm_resp.json()
+    assert resp.status_code == 200
+    return resp.json()
 
 
 async def _verify_email_in_db(db_session, user_id: str):
@@ -105,7 +104,7 @@ def _ride_body(ride_hash: str, **overrides) -> dict:
 async def _setup_user(app_client, db_session, email, device_id):
     """Register, pair device, verify email, start search. Returns (reg_data, pairing_data)."""
     reg = await _register(app_client, email)
-    pairing = await _pair_device(app_client, reg["access_token"], device_id)
+    pairing = await _pair_device(app_client, email, device_id)
     await _verify_email_in_db(db_session, reg["user_id"])
     await _start_search(app_client, reg["access_token"])
     return reg, pairing

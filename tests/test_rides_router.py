@@ -10,8 +10,7 @@ from app.models.ride import Ride
 RIDES_URL = "/api/v1/rides"
 RIDES_EVENTS_URL = "/api/v1/rides/events"
 REGISTER_URL = "/api/v1/auth/register"
-PAIRING_GENERATE_URL = "/api/v1/pairing/generate"
-PAIRING_CONFIRM_URL = "/api/v1/pairing/confirm"
+SEARCH_LOGIN_URL = "/api/v1/auth/search-login"
 FCM_REGISTER_URL = "/api/v1/fcm/register"
 
 _TEST_PASSWORD = "securePass1"
@@ -29,18 +28,19 @@ async def _register(app_client, email="rides@example.com"):
     return resp.json()
 
 
-async def _pair_device(app_client, access_token, device_id="rides-device-001"):
-    """Pair a device via generate + confirm flow."""
-    gen_resp = await app_client.post(PAIRING_GENERATE_URL, headers=_jwt(access_token))
-    assert gen_resp.status_code == 201
-    code = gen_resp.json()["code"]
-
-    confirm_resp = await app_client.post(
-        PAIRING_CONFIRM_URL,
-        json={"code": code, "device_id": device_id, "timezone": "America/New_York"},
+async def _pair_device(app_client, email, device_id="rides-device-001"):
+    """Register a search device via search-login endpoint."""
+    resp = await app_client.post(
+        SEARCH_LOGIN_URL,
+        json={
+            "email": email,
+            "password": _TEST_PASSWORD,
+            "device_id": device_id,
+            "timezone": "America/New_York",
+        },
     )
-    assert confirm_resp.status_code == 200
-    return confirm_resp.json()
+    assert resp.status_code == 200
+    return resp.json()
 
 
 async def _register_fcm(app_client, access_token, fcm_token="test-fcm-token-123"):
@@ -87,7 +87,7 @@ def _ride_body(**overrides) -> dict:
 async def test_create_ride_valid_data_returns_201(app_client, db_session):
     """POST /rides with valid data -> 201, ride saved, FCM push sent."""
     reg = await _register(app_client, email="ride1@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride1-dev")
+    pairing = await _pair_device(app_client, "ride1@example.com", device_id="ride1-dev")
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
@@ -126,7 +126,7 @@ async def test_create_ride_valid_data_returns_201(app_client, db_session):
 async def test_create_ride_idempotent_replay_returns_200(app_client, db_session):
     """POST /rides with same idempotency_key -> 200, same ride_id, no FCM."""
     reg = await _register(app_client, email="ride2@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride2-dev")
+    pairing = await _pair_device(app_client, "ride2@example.com", device_id="ride2-dev")
     await _register_fcm(app_client, reg["access_token"])
 
     body = _ride_body(idempotency_key="aaaabbbb-1111-2222-3333-444455556666")
@@ -190,8 +190,8 @@ async def test_create_ride_invalid_device_token_returns_401(app_client):
 
 async def test_create_ride_missing_fields_returns_422(app_client):
     """POST /rides with missing required fields -> 422."""
-    reg = await _register(app_client, email="ride4a@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride4a-dev")
+    await _register(app_client, email="ride4a@example.com")
+    pairing = await _pair_device(app_client, "ride4a@example.com", device_id="ride4a-dev")
 
     resp = await app_client.post(
         RIDES_URL,
@@ -203,8 +203,8 @@ async def test_create_ride_missing_fields_returns_422(app_client):
 
 async def test_create_ride_invalid_idempotency_key_returns_422(app_client):
     """POST /rides with non-UUID idempotency_key -> 422."""
-    reg = await _register(app_client, email="ride4b@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride4b-dev")
+    await _register(app_client, email="ride4b@example.com")
+    pairing = await _pair_device(app_client, "ride4b@example.com", device_id="ride4b-dev")
 
     resp = await app_client.post(
         RIDES_URL,
@@ -216,8 +216,8 @@ async def test_create_ride_invalid_idempotency_key_returns_422(app_client):
 
 async def test_create_ride_invalid_event_type_returns_422(app_client):
     """POST /rides with invalid event_type -> 422."""
-    reg = await _register(app_client, email="ride4c@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride4c-dev")
+    await _register(app_client, email="ride4c@example.com")
+    pairing = await _pair_device(app_client, "ride4c@example.com", device_id="ride4c-dev")
 
     resp = await app_client.post(
         RIDES_URL,
@@ -235,7 +235,7 @@ async def test_create_ride_invalid_event_type_returns_422(app_client):
 async def test_create_ride_fcm_failure_still_saves_ride(app_client, db_session):
     """POST /rides when FCM fails -> 201, ride saved."""
     reg = await _register(app_client, email="ride5@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride5-dev")
+    pairing = await _pair_device(app_client, "ride5@example.com", device_id="ride5-dev")
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
@@ -270,7 +270,7 @@ async def test_create_ride_fcm_failure_still_saves_ride(app_client, db_session):
 async def test_create_ride_no_fcm_token_skips_push(app_client, db_session):
     """POST /rides when user has no FCM token -> 201, FCM not called."""
     reg = await _register(app_client, email="ride6@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride6-dev")
+    pairing = await _pair_device(app_client, "ride6@example.com", device_id="ride6-dev")
     # NOTE: NOT registering FCM token
 
     with patch(
@@ -303,8 +303,8 @@ async def test_create_ride_no_fcm_token_skips_push(app_client, db_session):
 
 async def test_create_ride_data_saved_correctly(app_client, db_session):
     """POST /rides -> ride_data stored correctly as JSONB."""
-    reg = await _register(app_client, email="ride7@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride7-dev")
+    await _register(app_client, email="ride7@example.com")
+    pairing = await _pair_device(app_client, "ride7@example.com", device_id="ride7-dev")
 
     ride_data = {
         "price": 42.00,
@@ -353,7 +353,7 @@ async def test_create_ride_data_saved_correctly(app_client, db_session):
 async def test_create_ride_fcm_payload_correct(app_client):
     """POST /rides -> FCM called with correct payload fields."""
     reg = await _register(app_client, email="ride8@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ride8-dev")
+    pairing = await _pair_device(app_client, "ride8@example.com", device_id="ride8-dev")
     await _register_fcm(app_client, reg["access_token"], fcm_token="ride8-fcm-tok")
 
     with patch(
@@ -410,7 +410,7 @@ async def _create_rides_for_user(app_client, device_token, device_id, count):
 async def test_get_ride_events_first_page_no_cursor(app_client, db_session):
     """GET /rides/events without cursor -> first page with default limit=20."""
     reg = await _register(app_client, email="events1@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ev1-dev")
+    pairing = await _pair_device(app_client, "events1@example.com", device_id="ev1-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev1-dev", count=3)
 
@@ -446,7 +446,7 @@ async def test_get_ride_events_first_page_no_cursor(app_client, db_session):
 async def test_get_ride_events_with_cursor(app_client, db_session):
     """GET /rides/events with cursor -> returns next page, no overlap."""
     reg = await _register(app_client, email="events2@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ev2-dev")
+    pairing = await _pair_device(app_client, "events2@example.com", device_id="ev2-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev2-dev", count=5)
 
@@ -487,7 +487,7 @@ async def test_get_ride_events_with_cursor(app_client, db_session):
 async def test_get_ride_events_last_page(app_client, db_session):
     """GET /rides/events on last page -> has_more=false, next_cursor=null."""
     reg = await _register(app_client, email="events3@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ev3-dev")
+    pairing = await _pair_device(app_client, "events3@example.com", device_id="ev3-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev3-dev", count=3)
 
@@ -601,7 +601,7 @@ async def test_get_ride_events_no_events_returns_empty(app_client, db_session):
 async def test_create_ride_fcm_exception_still_saves_ride(app_client, db_session):
     """POST /rides when send_push raises -> 201, ride saved (graceful degradation)."""
     reg = await _register(app_client, email="fcm-exc@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="fcm-exc-dev")
+    pairing = await _pair_device(app_client, "fcm-exc@example.com", device_id="fcm-exc-dev")
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
@@ -635,7 +635,7 @@ async def test_create_ride_fcm_exception_still_saves_ride(app_client, db_session
 async def test_create_ride_fcm_exception_logs_warning_with_ride_id(app_client, caplog):
     """POST /rides when FCM raises -> warning log contains ride_id and error."""
     reg = await _register(app_client, email="fcm-log@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="fcm-log-dev")
+    pairing = await _pair_device(app_client, "fcm-log@example.com", device_id="fcm-log-dev")
     await _register_fcm(app_client, reg["access_token"])
 
     with (
@@ -674,7 +674,7 @@ async def test_create_ride_fcm_exception_logs_warning_with_ride_id(app_client, c
 async def test_create_ride_fcm_payload_values_all_strings(app_client):
     """POST /rides -> FCM payload contains only string values (FCM requirement)."""
     reg = await _register(app_client, email="fcm-str@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="fcm-str-dev")
+    pairing = await _pair_device(app_client, "fcm-str@example.com", device_id="fcm-str-dev")
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
@@ -715,7 +715,7 @@ async def test_create_ride_fcm_payload_values_all_strings(app_client):
 async def test_events_list_response_serialization(app_client, db_session):
     """GET /rides/events -> response has correct cursor-based structure."""
     reg = await _register(app_client, email="serial@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="serial-dev")
+    pairing = await _pair_device(app_client, "serial@example.com", device_id="serial-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "serial-dev", count=2)
 
@@ -769,8 +769,8 @@ async def test_events_list_response_serialization(app_client, db_session):
 
 async def test_create_ride_invalid_ride_data_missing_price_returns_422(app_client):
     """POST /rides with ride_data missing required 'price' -> 422."""
-    reg = await _register(app_client, email="ridedata1@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ridedata1-dev")
+    await _register(app_client, email="ridedata1@example.com")
+    pairing = await _pair_device(app_client, "ridedata1@example.com", device_id="ridedata1-dev")
 
     resp = await app_client.post(
         RIDES_URL,
@@ -794,8 +794,8 @@ async def test_create_ride_invalid_ride_data_missing_pickup_location_returns_422
     app_client,
 ):
     """POST /rides with ride_data missing required 'pickup_location' -> 422."""
-    reg = await _register(app_client, email="ridedata2@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="ridedata2-dev")
+    await _register(app_client, email="ridedata2@example.com")
+    pairing = await _pair_device(app_client, "ridedata2@example.com", device_id="ridedata2-dev")
 
     resp = await app_client.post(
         RIDES_URL,
@@ -926,7 +926,7 @@ async def test_get_ride_events_user_isolation(app_client, db_session):
     """User A cannot see User B's rides via GET /rides/events."""
     # User A with rides
     reg_a = await _register(app_client, email="iso-a@example.com")
-    pairing_a = await _pair_device(app_client, reg_a["access_token"], device_id="iso-a-dev")
+    pairing_a = await _pair_device(app_client, "iso-a@example.com", device_id="iso-a-dev")
     await _create_rides_for_user(app_client, pairing_a["device_token"], "iso-a-dev", count=3)
 
     # User B with no rides
@@ -953,7 +953,7 @@ async def test_get_ride_events_user_isolation(app_client, db_session):
 async def test_get_ride_events_paginate_entire_dataset(app_client, db_session):
     """Paginating through entire dataset via cursor covers all events without overlap."""
     reg = await _register(app_client, email="fullpag@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="fullpag-dev")
+    pairing = await _pair_device(app_client, "fullpag@example.com", device_id="fullpag-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "fullpag-dev", count=5)
 
@@ -1059,8 +1059,8 @@ async def test_create_ride_race_condition_returns_200(app_client, db_session):
     """
     from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
-    reg = await _register(app_client, email="race@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="race-dev")
+    await _register(app_client, email="race@example.com")
+    pairing = await _pair_device(app_client, "race@example.com", device_id="race-dev")
 
     # Mock ride object that the second get_ride_by_idempotency call returns
     mock_ride = type("MockRide", (), {"id": uuid4()})()
@@ -1126,8 +1126,8 @@ async def test_create_ride_missing_device_headers_returns_422(app_client):
 
 async def test_create_ride_ride_hash_too_short_returns_422(app_client):
     """POST /rides with ride_hash of 63 chars -> 422."""
-    reg = await _register(app_client, email="hash-short@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-short-dev")
+    await _register(app_client, email="hash-short@example.com")
+    pairing = await _pair_device(app_client, "hash-short@example.com", device_id="hash-short-dev")
 
     resp = await app_client.post(
         RIDES_URL,
@@ -1147,8 +1147,10 @@ async def test_create_ride_ride_hash_too_short_returns_422(app_client):
 
 async def test_create_ride_ride_hash_non_hex_returns_422(app_client):
     """POST /rides with ride_hash containing non-hex characters -> 422."""
-    reg = await _register(app_client, email="hash-nonhex@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-nonhex-dev")
+    await _register(app_client, email="hash-nonhex@example.com")
+    pairing = await _pair_device(
+        app_client, "hash-nonhex@example.com", device_id="hash-nonhex-dev"
+    )
 
     resp = await app_client.post(
         RIDES_URL,
@@ -1168,8 +1170,8 @@ async def test_create_ride_ride_hash_non_hex_returns_422(app_client):
 
 async def test_create_ride_ride_hash_uppercase_accepted(app_client, db_session):
     """POST /rides with uppercase ride_hash -> accepted, stored lowercase."""
-    reg = await _register(app_client, email="hash-upper@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-upper-dev")
+    await _register(app_client, email="hash-upper@example.com")
+    pairing = await _pair_device(app_client, "hash-upper@example.com", device_id="hash-upper-dev")
 
     uppercase_hash = "A" * 64
 
@@ -1198,8 +1200,8 @@ async def test_create_ride_ride_hash_uppercase_accepted(app_client, db_session):
 
 async def test_create_ride_valid_timezone_accepted(app_client):
     """POST /rides with valid IANA timezone -> accepted."""
-    reg = await _register(app_client, email="tz-valid@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-valid-dev")
+    await _register(app_client, email="tz-valid@example.com")
+    pairing = await _pair_device(app_client, "tz-valid@example.com", device_id="tz-valid-dev")
 
     with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
@@ -1225,8 +1227,8 @@ async def test_create_ride_invalid_timezone_not_rejected(app_client):
     Per PRD section 6: invalid timezone should fallback to UTC in business
     logic (task 5.2), not cause a 422 validation error.
     """
-    reg = await _register(app_client, email="tz-invalid@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-invalid-dev")
+    await _register(app_client, email="tz-invalid@example.com")
+    pairing = await _pair_device(app_client, "tz-invalid@example.com", device_id="tz-invalid-dev")
 
     with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
@@ -1248,8 +1250,8 @@ async def test_create_ride_invalid_timezone_not_rejected(app_client):
 
 async def test_create_ride_missing_timezone_returns_422(app_client):
     """POST /rides without timezone field -> 422."""
-    reg = await _register(app_client, email="tz-missing@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-missing-dev")
+    await _register(app_client, email="tz-missing@example.com")
+    pairing = await _pair_device(app_client, "tz-missing@example.com", device_id="tz-missing-dev")
 
     body = _ride_body(idempotency_key=str(uuid4()))
     del body["timezone"]
@@ -1269,8 +1271,10 @@ async def test_create_ride_missing_timezone_returns_422(app_client):
 
 async def test_create_ride_missing_ride_hash_returns_422(app_client):
     """POST /rides without ride_hash field -> 422."""
-    reg = await _register(app_client, email="hash-missing@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="hash-missing-dev")
+    await _register(app_client, email="hash-missing@example.com")
+    pairing = await _pair_device(
+        app_client, "hash-missing@example.com", device_id="hash-missing-dev"
+    )
 
     body = _ride_body(idempotency_key=str(uuid4()))
     del body["ride_hash"]
@@ -1295,8 +1299,8 @@ async def test_create_ride_missing_ride_hash_returns_422(app_client):
 
 async def test_create_ride_sets_verification_status_pending(app_client, db_session):
     """POST /rides -> ride saved with verification_status='PENDING' and verification_deadline."""
-    reg = await _register(app_client, email="vf-pending@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="vf-pending-dev")
+    await _register(app_client, email="vf-pending@example.com")
+    pairing = await _pair_device(app_client, "vf-pending@example.com", device_id="vf-pending-dev")
 
     with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
@@ -1322,8 +1326,8 @@ async def test_create_ride_sets_verification_status_pending(app_client, db_sessi
 
 async def test_create_ride_verification_deadline_before_pickup(app_client, db_session):
     """POST /rides with future pickup_time -> deadline = pickup_time - N minutes."""
-    reg = await _register(app_client, email="vf-future@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="vf-future-dev")
+    await _register(app_client, email="vf-future@example.com")
+    pairing = await _pair_device(app_client, "vf-future@example.com", device_id="vf-future-dev")
 
     # Use a pickup_time far in the future so deadline is definitely in the future
     body = _ride_body(idempotency_key=str(uuid4()))
@@ -1357,8 +1361,8 @@ async def test_create_ride_verification_deadline_before_pickup(app_client, db_se
 
 async def test_create_ride_invalid_timezone_logs_fallback_warning(app_client, caplog):
     """POST /rides with invalid timezone -> logs RIDE_TIMEZONE_FALLBACK with ride_id."""
-    reg = await _register(app_client, email="tz-log@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="tz-log-dev")
+    await _register(app_client, email="tz-log@example.com")
+    pairing = await _pair_device(app_client, "tz-log@example.com", device_id="tz-log-dev")
 
     with (
         patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
@@ -1393,8 +1397,8 @@ async def test_create_ride_invalid_timezone_logs_fallback_warning(app_client, ca
 
 async def test_create_ride_unparseable_pickup_time_sets_deadline(app_client, db_session, caplog):
     """POST /rides with unparseable pickup_time -> deadline set to ~now, warning logged."""
-    reg = await _register(app_client, email="parse-fail@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="parse-fail-dev")
+    await _register(app_client, email="parse-fail@example.com")
+    pairing = await _pair_device(app_client, "parse-fail@example.com", device_id="parse-fail-dev")
 
     body = _ride_body(idempotency_key=str(uuid4()))
     body["ride_data"]["pickup_time"] = "some random garbage text"
@@ -1464,7 +1468,9 @@ async def test_create_ride_charges_credits_happy_path(app_client, db_session):
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="charge-happy@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="charge-happy-dev")
+    pairing = await _pair_device(
+        app_client, "charge-happy@example.com", device_id="charge-happy-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
@@ -1520,7 +1526,9 @@ async def test_create_ride_partial_charge(app_client, db_session):
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="charge-partial@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="charge-partial-dev")
+    pairing = await _pair_device(
+        app_client, "charge-partial@example.com", device_id="charge-partial-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     # Reduce balance to 1
@@ -1575,7 +1583,9 @@ async def test_create_ride_partial_charge(app_client, db_session):
 async def test_create_ride_zero_balance_not_charged(app_client, db_session, caplog):
     """POST /rides with balance=0 -> credits_charged=0, RIDE_NOT_CHARGED logged."""
     reg = await _register(app_client, email="charge-zero@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="charge-zero-dev")
+    pairing = await _pair_device(
+        app_client, "charge-zero@example.com", device_id="charge-zero-dev"
+    )
     user_id = UUID(reg["user_id"])
 
     # Set balance to 0
@@ -1627,8 +1637,8 @@ async def test_create_ride_zero_balance_not_charged(app_client, db_session, capl
 
 async def test_create_ride_tier_matching_all_tiers(app_client, db_session):
     """POST /rides with different prices -> correct credits charged per tier."""
-    reg = await _register(app_client, email="tiers@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="tiers-dev")
+    await _register(app_client, email="tiers@example.com")
+    pairing = await _pair_device(app_client, "tiers@example.com", device_id="tiers-dev")
 
     # Default tiers: ≤$20→1, ≤$50→2, >$50→3
     # User starts with 10 credits
@@ -1674,7 +1684,7 @@ async def test_create_ride_credit_transaction_atomic(app_client, db_session):
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="atomic@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="atomic-dev")
+    pairing = await _pair_device(app_client, "atomic@example.com", device_id="atomic-dev")
     user_id = UUID(reg["user_id"])
 
     with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
@@ -1723,7 +1733,7 @@ async def test_create_ride_idempotent_replay_no_double_charge(app_client, db_ses
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="no-double@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="no-double-dev")
+    pairing = await _pair_device(app_client, "no-double@example.com", device_id="no-double-dev")
     user_id = UUID(reg["user_id"])
 
     idem_key = str(uuid4())
@@ -1773,7 +1783,9 @@ async def test_create_ride_idempotent_replay_no_double_charge(app_client, db_ses
 async def test_create_ride_credits_depleted_push_sent(app_client, db_session):
     """POST /rides that depletes balance -> send_credits_depleted called."""
     reg = await _register(app_client, email="depleted-push@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="depleted-push-dev")
+    pairing = await _pair_device(
+        app_client, "depleted-push@example.com", device_id="depleted-push-dev"
+    )
 
     # Set balance to exactly 2 (ride cost for $25.50 = 2 credits)
     await _set_user_balance(db_session, reg["user_id"], 2)
@@ -1801,8 +1813,10 @@ async def test_create_ride_credits_depleted_push_sent(app_client, db_session):
 
 async def test_create_ride_credits_not_depleted_no_push(app_client, db_session):
     """POST /rides that doesn't deplete balance -> send_credits_depleted NOT called."""
-    reg = await _register(app_client, email="not-depleted@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="not-depleted-dev")
+    await _register(app_client, email="not-depleted@example.com")
+    pairing = await _pair_device(
+        app_client, "not-depleted@example.com", device_id="not-depleted-dev"
+    )
 
     # Balance stays at default 10, cost = 2 → remaining 8
     with (
@@ -1827,7 +1841,9 @@ async def test_create_ride_credits_not_depleted_no_push(app_client, db_session):
 async def test_create_ride_zero_balance_no_depleted_push(app_client, db_session):
     """POST /rides with zero balance -> credits_charged=0, no CREDITS_DEPLETED push."""
     reg = await _register(app_client, email="zero-no-push@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="zero-no-push-dev")
+    pairing = await _pair_device(
+        app_client, "zero-no-push@example.com", device_id="zero-no-push-dev"
+    )
 
     # Set balance to 0
     await _set_user_balance(db_session, reg["user_id"], 0)
@@ -1854,7 +1870,9 @@ async def test_create_ride_zero_balance_no_depleted_push(app_client, db_session)
 async def test_create_ride_credits_depleted_fcm_failure_still_saves(app_client, db_session):
     """FCM failure in send_credits_depleted does not block ride creation."""
     reg = await _register(app_client, email="depleted-fail@example.com")
-    pairing = await _pair_device(app_client, reg["access_token"], device_id="depleted-fail-dev")
+    pairing = await _pair_device(
+        app_client, "depleted-fail@example.com", device_id="depleted-fail-dev"
+    )
 
     # Set balance to 2 → will deplete to 0
     await _set_user_balance(db_session, reg["user_id"], 2)

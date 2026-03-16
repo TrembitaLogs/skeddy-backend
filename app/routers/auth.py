@@ -31,6 +31,7 @@ from app.schemas.auth import (
     UpdatePhoneRequest,
     VerifyEmailRequest,
 )
+from app.schemas.pairing import SearchLoginRequest, SearchLoginResponse
 from app.services.auth_service import (
     create_access_token,
     create_refresh_token,
@@ -50,6 +51,7 @@ from app.services.auth_service import (
 )
 from app.services.credit_service import cache_balance, create_balance_with_bonus
 from app.services.email_service import send_password_reset_code, send_verification_code
+from app.services.pairing_service import search_login
 from app.utils.codes import generate_six_digit_code
 
 logger = logging.getLogger(__name__)
@@ -383,3 +385,28 @@ async def reset_password(
 
     logger.info("Password reset completed for user %s", user.id)
     return OkResponse()
+
+
+@router.post("/search-login", response_model=SearchLoginResponse)
+@limiter.limit("5/minute")
+async def search_login_endpoint(
+    request: Request,
+    response: Response,
+    body: SearchLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate Search App via email/password and register the device.
+
+    No JWT auth required — credentials are provided in the request body.
+    On success, returns a long-lived device_token for subsequent device auth.
+    Logging in on a new device replaces the old one (old device gets 401 on next ping).
+    """
+    device_token, user_id = await search_login(
+        email=body.email,
+        password=body.password,
+        device_id=body.device_id,
+        timezone_str=body.timezone,
+        db=db,
+        device_model=body.device_model,
+    )
+    return SearchLoginResponse(device_token=device_token, user_id=user_id)
