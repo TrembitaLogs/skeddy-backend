@@ -60,3 +60,6 @@ class User(Base):
     purchase_orders = relationship(
         "PurchaseOrder", back_populates="user", cascade="all, delete-orphan"
     )
+
+    def __str__(self) -> str:
+        return self.email

@@ -38,9 +38,9 @@ class TestCreditBalanceAdminConfiguration:
         assert "balance" in column_keys
         assert "updated_at" in column_keys
 
-    def test_can_create_is_false(self):
-        """CreditBalanceAdmin does not allow manual creation."""
-        assert CreditBalanceAdmin.can_create is False
+    def test_can_create_is_true(self):
+        """CreditBalanceAdmin allows manual creation via admin."""
+        assert CreditBalanceAdmin.can_create is True
 
     def test_can_edit_is_false(self):
         """CreditBalanceAdmin does not allow direct editing."""

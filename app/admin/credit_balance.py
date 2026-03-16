@@ -48,8 +48,7 @@ class CreditBalanceAdmin(ModelView, model=CreditBalance):
         "user": "User Email",
     }
 
-    # Balances are managed via registration and credit operations only
-    can_create = False
+    can_create = True
     can_edit = False
     can_delete = False
 
