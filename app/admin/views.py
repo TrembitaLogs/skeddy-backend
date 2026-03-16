@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from sqladmin import ModelView
 from starlette.requests import Request
-from wtforms import TextAreaField
+from wtforms import PasswordField, TextAreaField
 
 from app.models.accept_failure import AcceptFailure
 from app.models.app_config import AppConfig
@@ -127,10 +127,29 @@ class UserAdmin(ModelView, model=User):
         User.accept_failures,
     ]
 
+    # Add a plain-text password field for user creation/edit
+    form_extra_fields: ClassVar = {
+        "password": PasswordField("Password"),
+    }
+
     # Allow creating users via admin panel
     can_create = True
     can_delete = True
     can_edit = True
+
+    async def on_model_change(
+        self, data: dict[str, Any], model: User, is_created: bool, request: Request
+    ) -> None:
+        """Hash password on create; allow optional password update on edit."""
+        from app.services.auth_service import hash_password
+
+        password = data.get("password")
+        if is_created:
+            if not password:
+                raise ValueError("Password is required when creating a user.")
+            model.password_hash = hash_password(password)
+        elif password:
+            model.password_hash = hash_password(password)
 
 
 class PairedDeviceAdmin(ModelView, model=PairedDevice):
