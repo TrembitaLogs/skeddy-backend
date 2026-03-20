@@ -1,4 +1,10 @@
 services:
+  db:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
   app:
     build: !reset null
     image: ${APP_IMAGE:-ghcr.io/skeddy/backend:latest}
