@@ -1,4 +1,15 @@
+# Local development overrides (auto-loaded by docker compose).
+# Exposes DB and Redis ports on host for local tooling and tests.
+# NOT used in production (deploy uses explicit -f flags).
 services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
   app:
     ports:
       - "8000:8000"
