@@ -39,8 +39,11 @@ class TestNotificationType:
     def test_credits_low_value(self):
         assert NotificationType.CREDITS_LOW == "CREDITS_LOW"
 
-    def test_enum_has_exactly_five_members(self):
-        assert len(NotificationType) == 5
+    def test_balance_adjusted_value(self):
+        assert NotificationType.BALANCE_ADJUSTED == "BALANCE_ADJUSTED"
+
+    def test_enum_has_exactly_six_members(self):
+        assert len(NotificationType) == 6
 
 
 class TestRideAcceptedData:
