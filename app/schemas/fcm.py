@@ -20,6 +20,7 @@ class NotificationType(StrEnum):
     CREDITS_LOW = "CREDITS_LOW"
     RIDE_CREDIT_REFUNDED = "RIDE_CREDIT_REFUNDED"
     BALANCE_ADJUSTED = "BALANCE_ADJUSTED"
+    SEARCH_UPDATE_REQUIRED = "SEARCH_UPDATE_REQUIRED"
 
 
 class RideAcceptedData(BaseModel):
@@ -162,4 +163,13 @@ def create_search_offline_payload(
     return {
         "device_id": data.device_id,
         "last_ping_at": data.last_ping_at.isoformat(),
+    }
+
+
+def create_search_update_required_payload(
+    min_version: str,
+) -> dict[str, str]:
+    """Create an FCM-compatible data payload for SEARCH_UPDATE_REQUIRED."""
+    return {
+        "min_version": min_version,
     }

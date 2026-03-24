@@ -42,8 +42,11 @@ class TestNotificationType:
     def test_balance_adjusted_value(self):
         assert NotificationType.BALANCE_ADJUSTED == "BALANCE_ADJUSTED"
 
-    def test_enum_has_exactly_six_members(self):
-        assert len(NotificationType) == 6
+    def test_search_update_required_value(self):
+        assert NotificationType.SEARCH_UPDATE_REQUIRED == "SEARCH_UPDATE_REQUIRED"
+
+    def test_enum_has_exactly_seven_members(self):
+        assert len(NotificationType) == 7
 
 
 class TestRideAcceptedData:
