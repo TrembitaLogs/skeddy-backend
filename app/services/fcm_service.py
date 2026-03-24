@@ -16,6 +16,7 @@ from app.schemas.fcm import (
     create_credits_depleted_payload,
     create_credits_low_payload,
     create_ride_credit_refunded_payload,
+    create_search_update_required_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -253,3 +254,26 @@ async def send_balance_adjusted(
         )
     except Exception:
         logger.warning("FCM BALANCE_ADJUSTED failed for user %s", user_id, exc_info=True)
+
+
+async def send_search_update_required(
+    db: AsyncSession,
+    user_id: UUID,
+    min_version: str,
+) -> None:
+    """Send SEARCH_UPDATE_REQUIRED push to main app when search app is outdated.
+
+    Fire-and-forget: exceptions are caught and logged, never propagated.
+    """
+    try:
+        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
+        fcm_token = result.scalar_one_or_none()
+        if not fcm_token:
+            logger.debug("No FCM token for user %s, skipping SEARCH_UPDATE_REQUIRED push", user_id)
+            return
+
+        payload = create_search_update_required_payload(min_version=min_version)
+        await send_push(db, fcm_token, NotificationType.SEARCH_UPDATE_REQUIRED, payload, user_id)
+        logger.info("FCM_SEARCH_UPDATE_REQUIRED_SENT: user_id=%s", user_id)
+    except Exception:
+        logger.warning("FCM SEARCH_UPDATE_REQUIRED failed for user %s", user_id, exc_info=True)

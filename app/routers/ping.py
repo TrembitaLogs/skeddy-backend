@@ -15,7 +15,7 @@ from app.redis import get_redis
 from app.schemas.ping import PingFiltersResponse, PingRequest, PingResponse, VerifyRideItem
 from app.services.config_service import batch_get_ping_configs
 from app.services.credit_service import cache_balance, get_balance
-from app.services.fcm_service import send_ride_credit_refunded
+from app.services.fcm_service import send_ride_credit_refunded, send_search_update_required
 from app.services.filter_service import get_user_filters
 from app.services.ping_service import (
     build_verify_rides,
@@ -118,6 +118,14 @@ async def ping(
     if not version_ok:
         device.last_interval_sent = INTERVAL_FORCE_UPDATE
         await db.commit()
+
+        # Notify main app once per hour that search app needs update.
+        notified_key = f"search_update_notified:{device.user_id}"
+        already_notified = await redis.get(notified_key)
+        if not already_notified:
+            await redis.setex(notified_key, 3600, "1")
+            await send_search_update_required(db, device.user_id, configs.min_search_version)
+
         return PingResponse(
             search=False,
             force_update=True,
