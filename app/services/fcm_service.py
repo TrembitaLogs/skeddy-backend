@@ -12,6 +12,7 @@ from app.config import settings
 from app.models.user import User
 from app.schemas.fcm import (
     NotificationType,
+    create_balance_adjusted_payload,
     create_credits_depleted_payload,
     create_credits_low_payload,
     create_ride_credit_refunded_payload,
@@ -223,3 +224,32 @@ async def send_credits_low(
         )
     except Exception:
         logger.warning("FCM CREDITS_LOW failed for user %s", user_id, exc_info=True)
+
+
+async def send_balance_adjusted(
+    db: AsyncSession,
+    user_id: UUID,
+    amount: int,
+    new_balance: int,
+) -> None:
+    """Send BALANCE_ADJUSTED push notification after admin balance adjustment.
+
+    Fire-and-forget: exceptions are caught and logged, never propagated.
+    """
+    try:
+        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
+        fcm_token = result.scalar_one_or_none()
+        if not fcm_token:
+            logger.debug("No FCM token for user %s, skipping BALANCE_ADJUSTED push", user_id)
+            return
+
+        payload = create_balance_adjusted_payload(amount=amount, new_balance=new_balance)
+        await send_push(db, fcm_token, NotificationType.BALANCE_ADJUSTED, payload, user_id)
+        logger.info(
+            "FCM_BALANCE_ADJUSTED_SENT: user_id=%s, amount=%+d, new_balance=%d",
+            user_id,
+            amount,
+            new_balance,
+        )
+    except Exception:
+        logger.warning("FCM BALANCE_ADJUSTED failed for user %s", user_id, exc_info=True)

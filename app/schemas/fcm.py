@@ -19,6 +19,7 @@ class NotificationType(StrEnum):
     CREDITS_DEPLETED = "CREDITS_DEPLETED"
     CREDITS_LOW = "CREDITS_LOW"
     RIDE_CREDIT_REFUNDED = "RIDE_CREDIT_REFUNDED"
+    BALANCE_ADJUSTED = "BALANCE_ADJUSTED"
 
 
 class RideAcceptedData(BaseModel):
@@ -120,6 +121,28 @@ def create_ride_credit_refunded_payload(
     return {
         "ride_id": str(data.ride_id),
         "credits_refunded": str(data.credits_refunded),
+        "new_balance": str(data.new_balance),
+    }
+
+
+class BalanceAdjustedData(BaseModel):
+    """Validation model for BALANCE_ADJUSTED notification data payload."""
+
+    amount: int
+    new_balance: int
+
+
+def create_balance_adjusted_payload(
+    amount: int,
+    new_balance: int,
+) -> dict[str, str]:
+    """Create a validated, FCM-compatible data payload for BALANCE_ADJUSTED.
+
+    Validates inputs via Pydantic and converts all values to strings.
+    """
+    data = BalanceAdjustedData(amount=amount, new_balance=new_balance)
+    return {
+        "amount": str(data.amount),
         "new_balance": str(data.new_balance),
     }
 

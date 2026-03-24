@@ -15,6 +15,7 @@ from app.models.credit_transaction import TransactionType
 from app.models.user import User
 from app.redis import redis_client
 from app.services.credit_service import add_credits
+from app.services.fcm_service import send_balance_adjusted
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,9 @@ class CreditBalanceAdmin(ModelView, model=CreditBalance):
                         current_balance = new_balance
                         form_amount = ""
                         form_description = ""
+
+                        # Notify user about admin balance adjustment
+                        await send_balance_adjusted(session, user_id, amount, new_balance)
                     except Exception:
                         logger.exception("Failed to adjust balance for user %s", user_id)
                         error = "Failed to adjust balance. Please try again."
