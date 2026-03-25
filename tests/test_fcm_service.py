@@ -483,9 +483,12 @@ class TestSendCreditsDepleted:
     async def test_sends_push_with_correct_payload(self, user_id):
         """Calls send_push with CREDITS_DEPLETED type and balance='0'."""
         mock_db = AsyncMock(spec=AsyncSession)
-        # Simulate User.fcm_token query returning a token
+        # Simulate _get_user_push_info query returning (fcm_token, language)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_row = MagicMock()
+        mock_row.fcm_token = "test-fcm-token"
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(
@@ -501,13 +504,17 @@ class TestSendCreditsDepleted:
                 "CREDITS_DEPLETED",
                 {"balance": "0"},
                 user_id,
+                "en",
             )
 
     async def test_all_payload_values_are_strings(self, user_id):
         """FCM data payload must have all string values."""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_row = MagicMock()
+        mock_row.fcm_token = "test-fcm-token"
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(
@@ -525,7 +532,10 @@ class TestSendCreditsDepleted:
         """Does not call send_push if user has no FCM token."""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_row = MagicMock()
+        mock_row.fcm_token = None
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(
@@ -540,7 +550,10 @@ class TestSendCreditsDepleted:
         """Fire-and-forget: FCM exceptions do not propagate."""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_row = MagicMock()
+        mock_row.fcm_token = "test-fcm-token"
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(
@@ -570,7 +583,10 @@ class TestSendRideCreditRefunded:
         """Calls send_push with RIDE_CREDIT_REFUNDED type and correct data."""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_row = MagicMock()
+        mock_row.fcm_token = "test-fcm-token"
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(
@@ -590,13 +606,17 @@ class TestSendRideCreditRefunded:
                     "new_balance": "15",
                 },
                 user_id,
+                "en",
             )
 
     async def test_all_payload_values_are_strings(self, user_id, ride_id):
         """FCM data payload must have all string values."""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = "test-fcm-token"
+        mock_row = MagicMock()
+        mock_row.fcm_token = "test-fcm-token"
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(
@@ -614,7 +634,10 @@ class TestSendRideCreditRefunded:
         """Does not call send_push if user has no FCM token."""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_row = MagicMock()
+        mock_row.fcm_token = None
+        mock_row.language = "en"
+        mock_result.one_or_none.return_value = mock_row
         mock_db.execute.return_value = mock_result
 
         with patch(

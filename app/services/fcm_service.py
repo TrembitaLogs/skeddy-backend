@@ -18,6 +18,7 @@ from app.schemas.fcm import (
     create_ride_credit_refunded_payload,
     create_search_update_required_payload,
 )
+from app.services.config_service import get_push_templates
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,12 @@ async def send_push(
     notification_type: str,
     data: dict,
     user_id: UUID,
+    language: str = "en",
 ) -> bool:
     """Send a data-only FCM push notification with retry and exponential backoff.
+
+    Resolves title/body from push notification templates in AppConfig,
+    substitutes placeholders with values from the data payload.
 
     Handles specific FCM errors:
     - UnregisteredError: Token expired/invalid, clears from DB, no retry.
@@ -86,12 +91,28 @@ async def send_push(
         notification_type: Type string added to data payload as 'type' field.
         data: Notification payload. All values are converted to strings.
         user_id: The user's ID (for logging and token cleanup).
+        language: User's language code for template resolution (default: "en").
 
     Returns:
         True if sent successfully, False on permanent error or after all retries.
     """
     string_data = {k: str(v) for k, v in data.items()}
     string_data["type"] = notification_type
+
+    # Resolve title/body from templates
+    try:
+        from app.redis import redis_client
+
+        templates = await get_push_templates(db, redis_client)
+        template = templates.get_template(notification_type, language)
+        if template:
+            string_data["title"] = template.title.format_map(
+                {k: v for k, v in string_data.items()}
+            )
+            string_data["body"] = template.body.format_map({k: v for k, v in string_data.items()})
+    except Exception:
+        logger.warning("Failed to resolve push template for %s", notification_type, exc_info=True)
+
     message = messaging.Message(data=string_data, token=fcm_token)
 
     loop = asyncio.get_running_loop()
@@ -142,6 +163,18 @@ async def send_push(
     return False  # Unreachable; satisfies type checker
 
 
+async def _get_user_push_info(db: AsyncSession, user_id: UUID) -> tuple[str | None, str]:
+    """Fetch user's FCM token and language for push notifications.
+
+    Returns (fcm_token, language). fcm_token may be None.
+    """
+    result = await db.execute(select(User.fcm_token, User.language).where(User.id == user_id))
+    row = result.one_or_none()
+    if row is None:
+        return None, "en"
+    return row.fcm_token, row.language or "en"
+
+
 async def send_ride_credit_refunded(
     db: AsyncSession,
     user_id: UUID,
@@ -154,8 +187,7 @@ async def send_ride_credit_refunded(
     Fire-and-forget: exceptions are caught and logged, never propagated.
     """
     try:
-        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
-        fcm_token = result.scalar_one_or_none()
+        fcm_token, language = await _get_user_push_info(db, user_id)
         if not fcm_token:
             logger.debug(
                 "No FCM token for user %s, skipping RIDE_CREDIT_REFUNDED push",
@@ -168,7 +200,9 @@ async def send_ride_credit_refunded(
             credits_refunded=credits_refunded,
             new_balance=new_balance,
         )
-        await send_push(db, fcm_token, NotificationType.RIDE_CREDIT_REFUNDED, payload, user_id)
+        await send_push(
+            db, fcm_token, NotificationType.RIDE_CREDIT_REFUNDED, payload, user_id, language
+        )
         logger.info("FCM_RIDE_CREDIT_REFUNDED_SENT: user_id=%s, ride_id=%s", user_id, ride_id)
     except Exception:
         logger.warning(
@@ -185,14 +219,15 @@ async def send_credits_depleted(db: AsyncSession, user_id: UUID) -> None:
     Fire-and-forget: exceptions are caught and logged, never propagated.
     """
     try:
-        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
-        fcm_token = result.scalar_one_or_none()
+        fcm_token, language = await _get_user_push_info(db, user_id)
         if not fcm_token:
             logger.debug("No FCM token for user %s, skipping CREDITS_DEPLETED push", user_id)
             return
 
         payload = create_credits_depleted_payload()
-        await send_push(db, fcm_token, NotificationType.CREDITS_DEPLETED, payload, user_id)
+        await send_push(
+            db, fcm_token, NotificationType.CREDITS_DEPLETED, payload, user_id, language
+        )
         logger.info("FCM_CREDITS_DEPLETED_SENT: user_id=%s", user_id)
     except Exception:
         logger.warning("FCM CREDITS_DEPLETED failed for user %s", user_id, exc_info=True)
@@ -209,14 +244,13 @@ async def send_credits_low(
     Fire-and-forget: exceptions are caught and logged, never propagated.
     """
     try:
-        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
-        fcm_token = result.scalar_one_or_none()
+        fcm_token, language = await _get_user_push_info(db, user_id)
         if not fcm_token:
             logger.debug("No FCM token for user %s, skipping CREDITS_LOW push", user_id)
             return
 
         payload = create_credits_low_payload(balance=balance, threshold=threshold)
-        await send_push(db, fcm_token, NotificationType.CREDITS_LOW, payload, user_id)
+        await send_push(db, fcm_token, NotificationType.CREDITS_LOW, payload, user_id, language)
         logger.info(
             "FCM_CREDITS_LOW_SENT: user_id=%s, balance=%d, threshold=%d",
             user_id,
@@ -238,14 +272,15 @@ async def send_balance_adjusted(
     Fire-and-forget: exceptions are caught and logged, never propagated.
     """
     try:
-        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
-        fcm_token = result.scalar_one_or_none()
+        fcm_token, language = await _get_user_push_info(db, user_id)
         if not fcm_token:
             logger.debug("No FCM token for user %s, skipping BALANCE_ADJUSTED push", user_id)
             return
 
         payload = create_balance_adjusted_payload(amount=amount, new_balance=new_balance)
-        await send_push(db, fcm_token, NotificationType.BALANCE_ADJUSTED, payload, user_id)
+        await send_push(
+            db, fcm_token, NotificationType.BALANCE_ADJUSTED, payload, user_id, language
+        )
         logger.info(
             "FCM_BALANCE_ADJUSTED_SENT: user_id=%s, amount=%+d, new_balance=%d",
             user_id,
@@ -266,14 +301,15 @@ async def send_search_update_required(
     Fire-and-forget: exceptions are caught and logged, never propagated.
     """
     try:
-        result = await db.execute(select(User.fcm_token).where(User.id == user_id))
-        fcm_token = result.scalar_one_or_none()
+        fcm_token, language = await _get_user_push_info(db, user_id)
         if not fcm_token:
             logger.debug("No FCM token for user %s, skipping SEARCH_UPDATE_REQUIRED push", user_id)
             return
 
         payload = create_search_update_required_payload(min_version=min_version)
-        await send_push(db, fcm_token, NotificationType.SEARCH_UPDATE_REQUIRED, payload, user_id)
+        await send_push(
+            db, fcm_token, NotificationType.SEARCH_UPDATE_REQUIRED, payload, user_id, language
+        )
         logger.info("FCM_SEARCH_UPDATE_REQUIRED_SENT: user_id=%s", user_id)
     except Exception:
         logger.warning("FCM SEARCH_UPDATE_REQUIRED failed for user %s", user_id, exc_info=True)

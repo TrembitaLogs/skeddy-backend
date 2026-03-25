@@ -43,6 +43,7 @@ class UserFactory(factory.Factory):
     password_hash = _TEST_PASSWORD_HASH
     phone_number = None
     fcm_token = None
+    language = "en"
 
 
 class CreditBalanceFactory(factory.Factory):
