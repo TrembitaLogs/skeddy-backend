@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.app_config import AppConfig
+from app.models.push_template import PushTemplate as PushTemplateModel
 from app.schemas.billing_config import (
     CreditProductsConfig,
     RideCreditTiersConfig,
 )
+from app.schemas.push_templates import PushNotificationTemplatesConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ CACHE_KEY_VERIFICATION_CHECK_INTERVAL = "app_config:verification_check_interval"
 CACHE_KEY_CREDIT_PRODUCTS = "app_config:credit_products"
 CACHE_KEY_RIDE_CREDIT_TIERS = "app_config:ride_credit_tiers"
 CACHE_KEY_REGISTRATION_BONUS = "app_config:registration_bonus"
+CACHE_KEY_PUSH_TEMPLATES = "app_config:push_templates"
 CACHE_TTL = 300  # 5 minutes (Redis)
 IN_MEMORY_TTL = 600  # 10 minutes (fallback when Redis is unavailable)
 
@@ -72,6 +75,7 @@ _DB_KEY_TO_CACHE_KEYS: dict[str, list[str]] = {
     "credit_products": [CACHE_KEY_CREDIT_PRODUCTS],
     "ride_credit_tiers": [CACHE_KEY_RIDE_CREDIT_TIERS],
     "registration_bonus_credits": [CACHE_KEY_REGISTRATION_BONUS],
+    "push_notification_templates": [CACHE_KEY_PUSH_TEMPLATES],
 }
 
 
@@ -466,6 +470,150 @@ async def get_ride_credit_tiers(db: AsyncSession, redis: Redis) -> RideCreditTie
 
     # 4. Fallback to defaults
     return RideCreditTiersConfig.model_validate(DEFAULT_RIDE_CREDIT_TIERS)
+
+
+# ---------------------------------------------------------------------------
+# Push notification templates
+# ---------------------------------------------------------------------------
+
+DEFAULT_PUSH_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
+    "RIDE_ACCEPTED": {
+        "en": {
+            "title": "New Ride",
+            "body": "Ride from {pickup_location} to {dropoff_location}, ${price}",
+        },
+        "es": {
+            "title": "Nuevo viaje",
+            "body": "Viaje de {pickup_location} a {dropoff_location}, ${price}",
+        },
+    },
+    "SEARCH_OFFLINE": {
+        "en": {
+            "title": "Device Offline",
+            "body": "Your search device has been offline since {last_ping_at}",
+        },
+        "es": {
+            "title": "Dispositivo fuera de línea",
+            "body": "Su dispositivo de búsqueda está fuera de línea desde {last_ping_at}",
+        },
+    },
+    "CREDITS_DEPLETED": {
+        "en": {
+            "title": "Credits Depleted",
+            "body": "Your credit balance is empty. Top up to continue.",
+        },
+        "es": {
+            "title": "Créditos agotados",
+            "body": "Su saldo de créditos está vacío. Recargue para continuar.",
+        },
+    },
+    "CREDITS_LOW": {
+        "en": {
+            "title": "Low Credits",
+            "body": "Your balance is {balance} credits. Minimum for a ride is {threshold}.",
+        },
+        "es": {
+            "title": "Créditos bajos",
+            "body": "Su saldo es de {balance} créditos. Mínimo para un viaje es {threshold}.",
+        },
+    },
+    "RIDE_CREDIT_REFUNDED": {
+        "en": {
+            "title": "Credit Refunded",
+            "body": "{credits_refunded} credit(s) refunded. New balance: {new_balance}",
+        },
+        "es": {
+            "title": "Crédito reembolsado",
+            "body": "{credits_refunded} crédito(s) reembolsado(s). Nuevo saldo: {new_balance}",
+        },
+    },
+    "BALANCE_ADJUSTED": {
+        "en": {
+            "title": "Balance Updated",
+            "body": "Your balance was adjusted by {amount}. New balance: {new_balance}",
+        },
+        "es": {
+            "title": "Saldo actualizado",
+            "body": "Su saldo fue ajustado en {amount}. Nuevo saldo: {new_balance}",
+        },
+    },
+    "SEARCH_UPDATE_REQUIRED": {
+        "en": {
+            "title": "Update Required",
+            "body": "Your search device needs an update to version {min_version}.",
+        },
+        "es": {
+            "title": "Actualización requerida",
+            "body": "Su dispositivo de búsqueda necesita una actualización a la versión {min_version}.",
+        },
+    },
+}
+
+
+async def get_push_templates(db: AsyncSession, redis: Redis) -> PushNotificationTemplatesConfig:
+    """Return push notification templates from push_templates table.
+
+    Resolution order: Redis cache -> DB -> DEFAULT_PUSH_TEMPLATES.
+    Returns a validated ``PushNotificationTemplatesConfig``.
+    """
+    raw_json: str | None = None
+
+    # 1. Try Redis cache
+    try:
+        cached = await redis.get(CACHE_KEY_PUSH_TEMPLATES)
+        if cached is not None:
+            raw_json = cached
+    except RedisError:
+        logger.warning(
+            "Redis unavailable when reading %s, falling back to DB",
+            CACHE_KEY_PUSH_TEMPLATES,
+        )
+        mem_value = _memory_cache.get(CACHE_KEY_PUSH_TEMPLATES)
+        if mem_value is not None:
+            return mem_value  # type: ignore[no-any-return]
+
+    # 2. Try DB (only when Redis miss)
+    if raw_json is None:
+        result = await db.execute(select(PushTemplateModel))
+        rows = result.scalars().all()
+
+        if rows:
+            data = {}
+            for row in rows:
+                data[row.notification_type] = {
+                    "en": {"title": row.title_en, "body": row.body_en},
+                    "es": {"title": row.title_es, "body": row.body_es},
+                }
+            raw_json = json.dumps(data)
+            try:
+                await redis.setex(CACHE_KEY_PUSH_TEMPLATES, CACHE_TTL, raw_json)
+            except RedisError:
+                logger.warning(
+                    "Redis unavailable when caching %s",
+                    CACHE_KEY_PUSH_TEMPLATES,
+                )
+
+    # 3. Parse and validate
+    if raw_json is not None:
+        try:
+            parsed = json.loads(raw_json)
+            value = PushNotificationTemplatesConfig.model_validate(parsed)
+            _memory_cache[CACHE_KEY_PUSH_TEMPLATES] = value
+            return value
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.warning("Invalid push templates, using defaults: %s", exc)
+
+    # 4. Fallback to defaults
+    return PushNotificationTemplatesConfig.model_validate(DEFAULT_PUSH_TEMPLATES)
+
+
+async def invalidate_push_templates(redis: Redis) -> None:
+    """Invalidate push templates cache after admin edit."""
+    _memory_cache.pop(CACHE_KEY_PUSH_TEMPLATES, None)
+    try:
+        await redis.delete(CACHE_KEY_PUSH_TEMPLATES)
+    except RedisError:
+        logger.warning("Redis unavailable when invalidating %s", CACHE_KEY_PUSH_TEMPLATES)
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ from app.admin.credit_balance import CreditBalanceAdmin
 from app.admin.credit_transaction import CreditTransactionAdmin
 from app.admin.dashboard import DashboardView
 from app.admin.purchase_order import PurchaseOrderAdmin
+from app.admin.push_template import PushTemplateAdmin
 from app.admin.views import (
     AcceptFailureAdmin,
     AppConfigAdmin,
@@ -107,6 +108,7 @@ def setup_admin(app):
     admin.add_view(CreditBalanceAdmin)
     admin.add_view(CreditTransactionAdmin)
     admin.add_view(PurchaseOrderAdmin)
+    admin.add_view(PushTemplateAdmin)
     admin.add_view(BackupView)
 
     return admin
