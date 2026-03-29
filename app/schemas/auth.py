@@ -10,6 +10,16 @@ class RegisterRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(min_length=8)
+    phone_number: str | None = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_e164(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not re.match(r"^\+[0-9]{7,15}$", v):
+            raise ValueError("INVALID_PHONE_FORMAT")
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -47,22 +57,9 @@ class ProfileResponse(BaseModel):
     email: str
     email_verified: bool
     phone_number: str | None
+    license_number: str | None
+    legacy_credits_claimed: bool
     created_at: datetime
-
-
-class UpdatePhoneRequest(BaseModel):
-    """Update phone number request schema."""
-
-    phone_number: str | None
-
-    @field_validator("phone_number")
-    @classmethod
-    def validate_phone_e164(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        if not re.match(r"^\+[0-9]{7,15}$", v):
-            raise ValueError("INVALID_PHONE_FORMAT")
-        return v
 
 
 class RequestResetRequest(BaseModel):

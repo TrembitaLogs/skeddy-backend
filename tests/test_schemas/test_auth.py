@@ -11,8 +11,8 @@ from app.schemas.auth import (
     OkResponse,
     RefreshRequest,
     RegisterRequest,
-    UpdatePhoneRequest,
 )
+from app.schemas.profile import UpdateProfileRequest
 
 
 class TestRegisterRequest:
@@ -144,49 +144,76 @@ class TestRefreshRequest:
             RefreshRequest()
 
 
-class TestUpdatePhoneRequest:
-    """Tests for UpdatePhoneRequest schema."""
+class TestUpdateProfileRequest:
+    """Tests for UpdateProfileRequest schema."""
 
     def test_phone_none_is_valid(self):
-        schema = UpdatePhoneRequest(phone_number=None)
+        schema = UpdateProfileRequest(phone_number=None)
         assert schema.phone_number is None
 
     def test_valid_ukrainian_number(self):
-        schema = UpdatePhoneRequest(phone_number="+380501234567")
+        schema = UpdateProfileRequest(phone_number="+380501234567")
         assert schema.phone_number == "+380501234567"
 
     def test_valid_short_number(self):
-        schema = UpdatePhoneRequest(phone_number="+1234567")
+        schema = UpdateProfileRequest(phone_number="+1234567")
         assert schema.phone_number == "+1234567"
 
     def test_valid_max_length_number(self):
-        schema = UpdatePhoneRequest(phone_number="+123456789012345")
+        schema = UpdateProfileRequest(phone_number="+123456789012345")
         assert schema.phone_number == "+123456789012345"
 
     def test_missing_plus_raises_validation_error(self):
         with pytest.raises(ValidationError) as exc_info:
-            UpdatePhoneRequest(phone_number="380501234567")
+            UpdateProfileRequest(phone_number="380501234567")
         assert "INVALID_PHONE_FORMAT" in str(exc_info.value)
 
     def test_too_short_raises_validation_error(self):
         with pytest.raises(ValidationError) as exc_info:
-            UpdatePhoneRequest(phone_number="+123456")
+            UpdateProfileRequest(phone_number="+123456")
         assert "INVALID_PHONE_FORMAT" in str(exc_info.value)
 
     def test_too_long_raises_validation_error(self):
         with pytest.raises(ValidationError) as exc_info:
-            UpdatePhoneRequest(phone_number="+1234567890123456")
+            UpdateProfileRequest(phone_number="+1234567890123456")
         assert "INVALID_PHONE_FORMAT" in str(exc_info.value)
 
     def test_letters_in_number_raises_validation_error(self):
         with pytest.raises(ValidationError) as exc_info:
-            UpdatePhoneRequest(phone_number="+12345abc90")
+            UpdateProfileRequest(phone_number="+12345abc90")
         assert "INVALID_PHONE_FORMAT" in str(exc_info.value)
 
     def test_empty_string_raises_validation_error(self):
         with pytest.raises(ValidationError) as exc_info:
-            UpdatePhoneRequest(phone_number="")
+            UpdateProfileRequest(phone_number="")
         assert "INVALID_PHONE_FORMAT" in str(exc_info.value)
+
+    def test_valid_license_number(self):
+        schema = UpdateProfileRequest(license_number="DL123456")
+        assert schema.license_number == "DL123456"
+
+    def test_license_none_is_valid(self):
+        schema = UpdateProfileRequest(license_number=None)
+        assert schema.license_number is None
+
+    def test_blank_license_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            UpdateProfileRequest(license_number="   ")
+        assert "INVALID_LICENSE_FORMAT" in str(exc_info.value)
+
+    def test_license_stripped(self):
+        schema = UpdateProfileRequest(license_number="  ABC123  ")
+        assert schema.license_number == "ABC123"
+
+    def test_both_fields_together(self):
+        schema = UpdateProfileRequest(phone_number="+12025551234", license_number="DL999")
+        assert schema.phone_number == "+12025551234"
+        assert schema.license_number == "DL999"
+
+    def test_model_fields_set_tracks_provided_fields(self):
+        schema = UpdateProfileRequest(phone_number="+12025551234")
+        assert "phone_number" in schema.model_fields_set
+        assert "license_number" not in schema.model_fields_set
 
 
 class TestDeleteAccountRequest:

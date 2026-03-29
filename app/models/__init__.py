@@ -2,6 +2,7 @@ from app.models.accept_failure import AcceptFailure
 from app.models.app_config import AppConfig
 from app.models.credit_balance import CreditBalance
 from app.models.credit_transaction import CreditTransaction
+from app.models.legacy_credit import LegacyCredit
 from app.models.paired_device import PairedDevice
 from app.models.purchase_order import PurchaseOrder
 from app.models.refresh_token import RefreshToken
@@ -15,6 +16,7 @@ __all__ = [
     "AppConfig",
     "CreditBalance",
     "CreditTransaction",
+    "LegacyCredit",
     "PairedDevice",
     "PurchaseOrder",
     "RefreshToken",

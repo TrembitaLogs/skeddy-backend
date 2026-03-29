@@ -10,6 +10,7 @@ from wtforms import Form, PasswordField, TextAreaField
 
 from app.models.accept_failure import AcceptFailure
 from app.models.app_config import AppConfig
+from app.models.legacy_credit import LegacyCredit
 from app.models.paired_device import PairedDevice
 from app.models.refresh_token import RefreshToken
 from app.models.ride import Ride
@@ -301,3 +302,41 @@ class RefreshTokenAdmin(ModelView, model=RefreshToken):
     can_create = False
     can_edit = False
     can_delete = True
+
+
+class LegacyCreditAdmin(ModelView, model=LegacyCredit):
+    """Admin view for legacy credit records imported from the old system."""
+
+    name = "Legacy Credit"
+    name_plural = "Legacy Credits"
+    icon = "fa-solid fa-clock-rotate-left"
+
+    column_list: ClassVar = [
+        LegacyCredit.old_user_id,
+        LegacyCredit.phone_number,
+        LegacyCredit.license_number,
+        LegacyCredit.name,
+        LegacyCredit.balance,
+        LegacyCredit.claimed_at,
+        LegacyCredit.imported_at,
+    ]
+
+    column_searchable_list: ClassVar = [
+        LegacyCredit.phone_number,
+        LegacyCredit.license_number,
+        LegacyCredit.name,
+        LegacyCredit.email,
+    ]
+
+    column_sortable_list: ClassVar = [
+        LegacyCredit.balance,
+        LegacyCredit.claimed_at,
+        LegacyCredit.imported_at,
+    ]
+
+    column_default_sort: ClassVar = [(LegacyCredit.balance, True)]
+
+    # Data is managed by import script and claim logic
+    can_create = False
+    can_edit = False
+    can_delete = False
