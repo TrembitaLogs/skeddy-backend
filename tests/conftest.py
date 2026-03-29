@@ -38,14 +38,16 @@ def _clear_memory_cache():
 
 
 def _test_database_url() -> str:
-    """Derive test database URL by appending '_test' to the database name."""
+    """Derive test database URL by appending '_test' to the database name.
+
+    If the database name already ends with '_test' (e.g. CI), use it as-is.
+    """
     url = settings.DATABASE_URL
-    # Replace last path segment (db name) with test db name
-    # e.g. .../skeddy -> .../skeddy_test
     base, _, db_name = url.rpartition("/")
-    # Strip query params from db_name if any
     db_only = db_name.split("?")[0]
     query = "?" + db_name.split("?")[1] if "?" in db_name else ""
+    if db_only.endswith("_test"):
+        return url
     return f"{base}/{db_only}_test{query}"
 
 
