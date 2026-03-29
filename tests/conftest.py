@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.models
 from app.config import settings
@@ -137,6 +137,9 @@ async def app_client(db_session, fake_redis):
 
     Rate limiting is disabled to prevent cross-test counter accumulation.
     Dedicated rate limiter tests use their own isolated app with in-memory storage.
+
+    Also rebinds sqladmin session_maker to the test database engine so that
+    admin views query the same database where test fixtures create tables.
     """
 
     async def override_get_db():
@@ -148,9 +151,35 @@ async def app_client(db_session, fake_redis):
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_redis] = override_get_redis
     limiter.enabled = False
+
+    # Rebind sqladmin session_maker and AsyncSessionLocal to the test database
+    # so admin views query the same DB where test fixtures create tables.
+    test_engine = create_async_engine(TEST_DATABASE_URL)
+    test_session_maker = async_sessionmaker(
+        bind=test_engine, class_=AsyncSession, autoflush=False, autocommit=False
+    )
+    from sqladmin.models import ModelView
+
+    originals: dict[type, object] = {}
+    for view_cls in ModelView.__subclasses__():
+        if hasattr(view_cls, "session_maker"):
+            originals[view_cls] = view_cls.session_maker
+            view_cls.session_maker = test_session_maker
+
+    # Dashboard and other BaseView subclasses use AsyncSessionLocal directly
+    import app.admin.dashboard as dashboard_mod
+
+    orig_session_local = dashboard_mod.AsyncSessionLocal
+    dashboard_mod.AsyncSessionLocal = test_session_maker
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+    dashboard_mod.AsyncSessionLocal = orig_session_local
+    for view_cls, orig in originals.items():
+        view_cls.session_maker = orig
+    await test_engine.dispose()
     app.dependency_overrides.clear()
     limiter.enabled = True
     await app_engine.dispose()
