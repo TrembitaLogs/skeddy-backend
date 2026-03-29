@@ -37,10 +37,25 @@ def _clear_memory_cache():
     _memory_cache.clear()
 
 
+def _test_database_url() -> str:
+    """Derive test database URL by appending '_test' to the database name."""
+    url = settings.DATABASE_URL
+    # Replace last path segment (db name) with test db name
+    # e.g. .../skeddy -> .../skeddy_test
+    base, _, db_name = url.rpartition("/")
+    # Strip query params from db_name if any
+    db_only = db_name.split("?")[0]
+    query = "?" + db_name.split("?")[1] if "?" in db_name else ""
+    return f"{base}/{db_only}_test{query}"
+
+
+TEST_DATABASE_URL = _test_database_url()
+
+
 @pytest_asyncio.fixture
 async def db_session():
-    """Provide a transactional database session that rolls back after each test."""
-    engine = create_async_engine(settings.DATABASE_URL)
+    """Provide a transactional database session using a separate test database."""
+    engine = create_async_engine(TEST_DATABASE_URL)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -92,6 +107,15 @@ async def fake_redis():
             keys = keys[0]
         return [store.get(key) for key in keys]
 
+    async def mock_incr(key):
+        current = int(store.get(key, "0"))
+        store[key] = str(current + 1)
+        return current + 1
+
+    async def mock_expire(key, ttl):
+        # TTL is ignored in the fake store, but key must exist
+        return 1 if key in store else 0
+
     redis = AsyncMock()
     redis.get = AsyncMock(side_effect=mock_get)
     redis.setex = AsyncMock(side_effect=mock_setex)
@@ -99,6 +123,8 @@ async def fake_redis():
     redis.exists = AsyncMock(side_effect=mock_exists)
     redis.ttl = AsyncMock(side_effect=mock_ttl)
     redis.mget = AsyncMock(side_effect=mock_mget)
+    redis.incr = AsyncMock(side_effect=mock_incr)
+    redis.expire = AsyncMock(side_effect=mock_expire)
     redis._store = store
     return redis
 

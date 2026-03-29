@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.middleware.rate_limiter import get_user_key, limiter
+from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.refresh_token import RefreshToken
 from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
@@ -28,7 +29,6 @@ from app.schemas.auth import (
     RegisterRequest,
     RequestResetRequest,
     ResetPasswordRequest,
-    UpdatePhoneRequest,
     VerifyEmailRequest,
 )
 from app.schemas.pairing import SearchLoginRequest, SearchLoginResponse
@@ -78,8 +78,18 @@ async def register(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
 
+    # Check phone uniqueness (if provided)
+    if body.phone_number:
+        existing = await get_user_by_phone(db, body.phone_number)
+        if existing:
+            raise HTTPException(status_code=409, detail="PHONE_ALREADY_EXISTS")
+
     # Create user with hashed password
-    user = User(email=body.email, password_hash=hash_password(body.password))
+    user = User(
+        email=body.email,
+        password_hash=hash_password(body.password),
+        phone_number=body.phone_number,
+    )
     db.add(user)
     await db.flush()  # Get user.id before creating related records
 
@@ -104,9 +114,10 @@ async def register(
     # Single commit for the entire operation
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
+        detail = "PHONE_ALREADY_EXISTS" if "phone_number" in str(exc) else "EMAIL_ALREADY_EXISTS"
+        raise HTTPException(status_code=409, detail=detail)
 
     # Write-through Redis cache for credit balance (after commit per PRD)
     await cache_balance(user.id, credit_balance.balance, redis)
@@ -165,13 +176,26 @@ async def refresh(
 @router.get("/me", response_model=ProfileResponse)
 @limiter.limit("60/minute", key_func=get_user_key)
 async def get_profile(
-    request: Request, response: Response, current_user: User = Depends(get_current_user)
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
+    has_legacy_claim = await db.execute(
+        select(CreditTransaction.id)
+        .where(
+            CreditTransaction.user_id == current_user.id,
+            CreditTransaction.type == TransactionType.LEGACY_IMPORT,
+        )
+        .limit(1)
+    )
     return ProfileResponse(
         user_id=current_user.id,
         email=current_user.email,
         email_verified=current_user.email_verified,
         phone_number=current_user.phone_number,
+        license_number=current_user.license_number,
+        legacy_credits_claimed=has_legacy_claim.scalar_one_or_none() is not None,
         created_at=current_user.created_at,
     )
 
@@ -269,29 +293,6 @@ async def logout(
     db: AsyncSession = Depends(get_db),
 ):
     await delete_user_refresh_tokens(db, current_user.id)
-    return OkResponse()
-
-
-@router.put("/phone", response_model=OkResponse)
-@limiter.limit("60/minute", key_func=get_user_key)
-async def update_phone(
-    request: Request,
-    response: Response,
-    body: UpdatePhoneRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    if body.phone_number is not None:
-        existing = await get_user_by_phone(db, body.phone_number)
-        if existing and existing.id != current_user.id:
-            raise HTTPException(status_code=409, detail="PHONE_ALREADY_EXISTS")
-
-    current_user.phone_number = body.phone_number
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="PHONE_ALREADY_EXISTS")
     return OkResponse()
 
 

@@ -17,6 +17,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     phone_number: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    license_number: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     fcm_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     language: Mapped[str] = mapped_column(String(10), nullable=False, server_default="en")

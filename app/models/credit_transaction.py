@@ -20,6 +20,7 @@ class TransactionType(StrEnum):
     RIDE_CHARGE = "RIDE_CHARGE"
     RIDE_REFUND = "RIDE_REFUND"
     ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
+    LEGACY_IMPORT = "LEGACY_IMPORT"
 
 
 class CreditTransaction(Base):

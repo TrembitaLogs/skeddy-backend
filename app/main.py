@@ -25,6 +25,7 @@ from app.routers.credits import router as credits_router
 from app.routers.fcm import router as fcm_router
 from app.routers.filters import router as filters_router
 from app.routers.ping import router as ping_router
+from app.routers.profile import router as profile_router
 from app.routers.rides import router as rides_router
 from app.routers.search import router as search_router
 from app.services.fcm_service import initialize_firebase
@@ -140,6 +141,7 @@ async def health_check():
 
 v1_router = APIRouter()
 v1_router.include_router(auth_router)
+v1_router.include_router(profile_router)
 v1_router.include_router(credits_router)
 v1_router.include_router(fcm_router)
 v1_router.include_router(filters_router)

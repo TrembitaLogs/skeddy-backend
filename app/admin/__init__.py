@@ -16,6 +16,7 @@ from app.admin.push_template import PushTemplateAdmin
 from app.admin.views import (
     AcceptFailureAdmin,
     AppConfigAdmin,
+    LegacyCreditAdmin,
     PairedDeviceAdmin,
     RefreshTokenAdmin,
     RideAdmin,
@@ -109,6 +110,7 @@ def setup_admin(app):
     admin.add_view(CreditTransactionAdmin)
     admin.add_view(PurchaseOrderAdmin)
     admin.add_view(PushTemplateAdmin)
+    admin.add_view(LegacyCreditAdmin)
     admin.add_view(BackupView)
 
     return admin
