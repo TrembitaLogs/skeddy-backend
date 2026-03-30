@@ -58,7 +58,7 @@ class ProfileResponse(BaseModel):
     email_verified: bool
     phone_number: str | None
     license_number: str | None
-    legacy_credits_claimed: bool
+    legacy_credits_restored: bool
     created_at: datetime
 
 

@@ -29,6 +29,13 @@ class PurchaseResponse(BaseModel):
     new_balance: int
 
 
+class RestoreCreditsResponse(BaseModel):
+    """Response schema for POST /credits/restore."""
+
+    ok: bool = True
+    restored_credits: int
+
+
 class CreditProductSchema(BaseModel):
     """Schema for a single credit product from AppConfig catalog."""
 

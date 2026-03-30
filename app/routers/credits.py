@@ -12,17 +12,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.middleware.rate_limiter import get_user_key, limiter
+from app.models.credit_balance import CreditBalance
 from app.models.credit_transaction import TransactionType
 from app.models.purchase_order import PurchaseOrder, PurchaseStatus
 from app.models.user import User
 from app.redis import get_redis
-from app.schemas.credits import PurchaseRequest, PurchaseResponse
+from app.schemas.credits import PurchaseRequest, PurchaseResponse, RestoreCreditsResponse
 from app.services.config_service import get_credit_products
-from app.services.credit_service import add_credits, get_balance
+from app.services.credit_service import add_credits, cache_balance, get_balance
 from app.services.google_play_service import (
     GooglePlayService,
     GooglePlayVerificationError,
 )
+from app.services.legacy_credit_service import RestoreStatus, try_restore_legacy_credits
 
 logger = logging.getLogger(__name__)
 
@@ -294,3 +296,57 @@ async def purchase_credits(
 
     # 8. Finalize: atomic CONSUMED -> VERIFIED + credit balance + transaction
     return await _finalize_purchase(order, current_user.id, db, redis, response)
+
+
+@router.post("/restore", response_model=RestoreCreditsResponse)
+@limiter.limit("3/hour", key_func=get_user_key)
+async def restore_legacy_credits(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Restore legacy credits from the old system.
+
+    Uses the current user's phone_number and license_number
+    to look up and transfer credits from the legacy_credits table.
+    """
+    result = await try_restore_legacy_credits(
+        user_id=current_user.id,
+        phone_number=current_user.phone_number,
+        license_number=current_user.license_number,
+        db=db,
+        redis=redis,
+    )
+
+    if result.status == RestoreStatus.ALREADY_RESTORED:
+        raise HTTPException(status_code=409, detail="ALREADY_RESTORED")
+
+    if result.status == RestoreStatus.INCOMPLETE_PROFILE:
+        raise HTTPException(status_code=422, detail="INCOMPLETE_PROFILE")
+
+    if result.status == RestoreStatus.RATE_LIMITED:
+        response.headers["Retry-After"] = str(result.retry_after_seconds)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "retry_after_seconds": result.retry_after_seconds,
+            },
+        )
+
+    if result.status == RestoreStatus.NO_MATCH:
+        raise HTTPException(status_code=404, detail="NO_MATCH")
+
+    # SUCCESS — commit and update cache
+    await db.commit()
+
+    balance_row = await db.execute(
+        select(CreditBalance.balance).where(CreditBalance.user_id == current_user.id)
+    )
+    balance = balance_row.scalar_one_or_none()
+    if balance is not None:
+        await cache_balance(current_user.id, balance, redis)
+
+    return RestoreCreditsResponse(restored_credits=result.restored_credits)
