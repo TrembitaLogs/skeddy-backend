@@ -195,7 +195,7 @@ async def get_profile(
         email_verified=current_user.email_verified,
         phone_number=current_user.phone_number,
         license_number=current_user.license_number,
-        legacy_credits_claimed=has_legacy_claim.scalar_one_or_none() is not None,
+        legacy_credits_restored=has_legacy_claim.scalar_one_or_none() is not None,
         created_at=current_user.created_at,
     )
 

@@ -53,6 +53,12 @@ def _test_database_url() -> str:
 
 TEST_DATABASE_URL = _test_database_url()
 
+# Safety: never drop tables on a non-test database
+assert "_test" in TEST_DATABASE_URL, (
+    f"Refusing to run tests: DATABASE_URL does not point to a test database. "
+    f"Got: {TEST_DATABASE_URL}"
+)
+
 
 @pytest_asyncio.fixture
 async def db_session():

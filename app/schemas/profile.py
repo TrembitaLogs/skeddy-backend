@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 
 class UpdateProfileRequest(BaseModel):
@@ -35,10 +35,6 @@ class UpdateProfileRequest(BaseModel):
 
 
 class UpdateProfileResponse(BaseModel):
-    """Response for profile update, includes legacy credit claim info."""
+    """Response for profile update."""
 
     ok: bool = True
-    legacy_credits_claimed: int | None = Field(
-        default=None,
-        description="Number of legacy credits transferred, null if none",
-    )
