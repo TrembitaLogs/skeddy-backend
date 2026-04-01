@@ -19,6 +19,7 @@ Custom key functions:
 import base64
 import json
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -33,18 +34,31 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# In-memory fallback constants
+_FALLBACK_WINDOW_SECONDS = 60
+_FALLBACK_MAX_REQUESTS = 30
+_FALLBACK_MAX_KEYS = 10_000
+
+
+class _FallbackRateLimitError(Exception):
+    """Raised by the in-memory fallback when the threshold is exceeded."""
+
 
 class ResilientLimiter(Limiter):
-    """Limiter subclass that fails open when Redis storage is unavailable.
+    """Limiter subclass with in-memory fallback when Redis is unavailable.
 
-    When the rate limit storage (Redis) is unreachable, the rate limit check
-    is skipped and the request proceeds without limiting. This prevents Redis
-    outages from cascading into full service unavailability.
+    When the rate limit storage (Redis) is unreachable, an in-memory
+    sliding-window counter provides basic abuse protection instead of
+    disabling rate limiting entirely.
 
     Works around a slowapi bug where ``request.state.view_rate_limit`` is not
     set when ``swallow_errors=True`` and the storage fails, causing an
     ``AttributeError`` in the decorator's header injection.
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._fallback_counts: dict[str, list[float]] = {}
 
     def _check_request_limit(
         self,
@@ -52,12 +66,14 @@ class ResilientLimiter(Limiter):
         endpoint_func: Callable[..., Any] | None,
         in_middleware: bool = True,
     ) -> None:
+        use_fallback = False
         try:
             super()._check_request_limit(request, endpoint_func, in_middleware)
         except RateLimitExceeded:
             raise
         except Exception:
-            logger.warning("Rate limit storage unavailable, skipping rate limit check")
+            use_fallback = True
+            logger.warning("Rate limit storage unavailable, using in-memory fallback")
         finally:
             # Ensure view_rate_limit is always set. The attribute is normally
             # assigned inside __evaluate_limits, but when the storage raises an
@@ -65,6 +81,32 @@ class ResilientLimiter(Limiter):
             # middleware both read this attribute for header injection.
             if not hasattr(request.state, "view_rate_limit"):
                 request.state.view_rate_limit = None
+
+        if use_fallback:
+            self._check_fallback_limit(request)
+
+    def _check_fallback_limit(self, request: Request) -> None:
+        """Simple in-memory sliding-window rate limit per remote address."""
+        key = get_remote_address(request)
+        now = time.monotonic()
+        cutoff = now - _FALLBACK_WINDOW_SECONDS
+
+        # Periodic cleanup to prevent unbounded memory growth
+        if len(self._fallback_counts) > _FALLBACK_MAX_KEYS:
+            self._fallback_counts = {
+                k: [t for t in v if t > cutoff]
+                for k, v in self._fallback_counts.items()
+                if any(t > cutoff for t in v)
+            }
+
+        timestamps = self._fallback_counts.get(key, [])
+        timestamps = [t for t in timestamps if t > cutoff]
+
+        if len(timestamps) >= _FALLBACK_MAX_REQUESTS:
+            raise _FallbackRateLimitError
+
+        timestamps.append(now)
+        self._fallback_counts[key] = timestamps
 
 
 limiter = ResilientLimiter(
@@ -128,8 +170,24 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) 
     return response
 
 
+async def fallback_rate_limit_handler(
+    request: Request, exc: _FallbackRateLimitError
+) -> JSONResponse:
+    """Handle in-memory fallback rate limit exceeded with the same format."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Rate limit exceeded. Try again later.",
+            }
+        },
+    )
+
+
 def setup_rate_limiter(app: FastAPI) -> None:
     """Register rate limiter on the FastAPI app."""
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(_FallbackRateLimitError, fallback_rate_limit_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)

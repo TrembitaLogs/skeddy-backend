@@ -1,15 +1,16 @@
-"""Tests for rate limiter behavior when Redis is unavailable (Task 14.5).
+"""Tests for rate limiter behavior when Redis is unavailable.
 
-Test strategy (adapted from task, aligned with API Contract):
+Test strategy:
 1. Production limiter is a ResilientLimiter instance
-2. Rate-limited endpoint still succeeds when storage is unavailable (fail-open)
-3. POST /ping still succeeds when storage is unavailable (fail-open)
+2. Rate-limited endpoint still succeeds when storage is unavailable (in-memory fallback)
+3. POST /ping still succeeds when storage is unavailable (in-memory fallback)
 4. Warning is logged when storage fails
 5. After storage recovers, rate limiting works again normally
+6. In-memory fallback enforces limits when threshold is exceeded
 
 Per API Contract, 503 SERVICE_UNAVAILABLE is only returned by endpoints that
 functionally depend on Redis (pairing, password reset). Rate limiting uses
-fail-open: skip rate limit check when Redis is unavailable.
+an in-memory fallback when Redis is unavailable.
 """
 
 import logging
@@ -25,6 +26,8 @@ from slowapi.util import get_remote_address
 
 from app.middleware.rate_limiter import (
     ResilientLimiter,
+    _FallbackRateLimitError,
+    fallback_rate_limit_handler,
     get_device_key,
     rate_limit_exceeded_handler,
 )
@@ -41,6 +44,7 @@ def _create_failopen_app() -> tuple[FastAPI, ResilientLimiter]:
     test_app = FastAPI()
     test_app.state.limiter = test_limiter
     test_app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    test_app.add_exception_handler(_FallbackRateLimitError, fallback_rate_limit_handler)
     test_app.add_middleware(SlowAPIMiddleware)
 
     @test_app.post("/auth/login")
@@ -84,12 +88,12 @@ def test_production_limiter_is_resilient_instance():
     assert isinstance(limiter, ResilientLimiter)
 
 
-# ─── Test 2: Endpoint succeeds when storage is unavailable (fail-open) ───
+# ─── Test 2: Endpoint succeeds when storage is unavailable (in-memory fallback) ───
 
 
 @pytest.mark.asyncio
 async def test_auth_login_succeeds_when_storage_unavailable(failopen_app):
-    """POST /auth/login returns 200 when rate limit storage fails (fail-open)."""
+    """POST /auth/login returns 200 when rate limit storage fails (in-memory fallback)."""
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
@@ -102,7 +106,7 @@ async def test_auth_login_succeeds_when_storage_unavailable(failopen_app):
 
 @pytest.mark.asyncio
 async def test_filters_endpoint_succeeds_when_storage_unavailable(failopen_app):
-    """GET /filters returns 200 when rate limit storage fails (fail-open)."""
+    """GET /filters returns 200 when rate limit storage fails (in-memory fallback)."""
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
@@ -118,7 +122,7 @@ async def test_filters_endpoint_succeeds_when_storage_unavailable(failopen_app):
 
 @pytest.mark.asyncio
 async def test_ping_succeeds_when_storage_unavailable(failopen_app):
-    """POST /ping returns 200 when rate limit storage fails (fail-open)."""
+    """POST /ping returns 200 when rate limit storage fails (in-memory fallback)."""
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
@@ -183,18 +187,42 @@ async def test_rate_limiting_resumes_after_storage_recovery(failopen_app):
         assert r.status_code == 429
 
 
-# ─── Test 6: Multiple requests during outage all succeed ───
+# ─── Test 6: Multiple requests during outage succeed within fallback threshold ───
 
 
 @pytest.mark.asyncio
 async def test_multiple_requests_succeed_during_storage_outage(failopen_app):
-    """Multiple requests to the same endpoint all succeed during storage outage."""
+    """Multiple requests within the fallback threshold succeed during storage outage."""
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
     with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Well beyond the 3/minute limit — all should succeed (fail-open)
+            # Well beyond the 3/minute Redis limit, but within the 30/min
+            # in-memory fallback threshold — all should succeed
             for i in range(10):
                 r = await client.post("/auth/login")
                 assert r.status_code == 200, f"Request {i + 1} failed unexpectedly"
+
+
+# ─── Test 7: In-memory fallback enforces limits when threshold exceeded ───
+
+
+@pytest.mark.asyncio
+async def test_fallback_enforces_limit_when_threshold_exceeded(failopen_app):
+    """In-memory fallback returns 429 after exceeding the fallback threshold."""
+    from app.middleware.rate_limiter import _FALLBACK_MAX_REQUESTS
+
+    app, test_limiter = failopen_app
+    transport = ASGITransport(app=app)
+
+    with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Send requests up to the fallback limit
+            for i in range(_FALLBACK_MAX_REQUESTS):
+                r = await client.post("/auth/login")
+                assert r.status_code == 200, f"Request {i + 1} should have succeeded"
+
+            # Next request should be rate limited by the in-memory fallback
+            r = await client.post("/auth/login")
+            assert r.status_code == 429
