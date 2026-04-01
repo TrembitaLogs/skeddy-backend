@@ -10,6 +10,7 @@ from starlette.requests import Request
 from app.models.email_template import EmailTemplate
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("audit.admin")
 
 
 class EmailTemplateAdmin(ModelView, model=EmailTemplate):
@@ -50,6 +51,11 @@ class EmailTemplateAdmin(ModelView, model=EmailTemplate):
         self, data: dict[str, Any], model: EmailTemplate, is_created: bool, request: Request
     ) -> None:
         """Invalidate email templates cache after edit."""
+        audit_logger.info(
+            "Admin email template updated: %s",
+            model.email_type,
+            extra={"action": "updated", "email_type": model.email_type},
+        )
         from app.redis import redis_client
         from app.services.config_service import invalidate_email_templates
 

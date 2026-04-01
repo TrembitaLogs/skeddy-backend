@@ -20,6 +20,7 @@ from app.models.search_status import SearchStatus
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("audit.admin")
 
 # AppConfig keys that store JSON and require Pydantic validation on save.
 _JSON_VALIDATORS: dict[str, type] = {}
@@ -86,6 +87,13 @@ class AppConfigAdmin(ModelView, model=AppConfig):
         self, data: dict[str, Any], model: AppConfig, is_created: bool, request: Request
     ) -> None:
         """Invalidate Redis and in-memory cache after config create/update."""
+        action = "created" if is_created else "updated"
+        audit_logger.info(
+            "Admin config %s: %s",
+            action,
+            model.key,
+            extra={"action": action, "config_key": model.key},
+        )
         from app.redis import redis_client
         from app.services.config_service import invalidate_config
 
@@ -156,6 +164,14 @@ class UserAdmin(ModelView, model=User):
             model.password_hash = hash_password(password)
         elif password:
             model.password_hash = hash_password(password)
+
+        action = "created" if is_created else "updated"
+        audit_logger.info(
+            "Admin user %s: %s",
+            action,
+            model.email,
+            extra={"action": action, "email": model.email},
+        )
 
 
 class PairedDeviceAdmin(ModelView, model=PairedDevice):

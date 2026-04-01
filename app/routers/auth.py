@@ -151,6 +151,7 @@ async def login(
     # Always run bcrypt verify to prevent timing-based email enumeration
     password_valid = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
     if not user or not password_valid:
+        logger.warning("Login failed: invalid credentials", extra={"email": body.email})
         raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
 
     # Generate token pair
@@ -163,6 +164,7 @@ async def login(
         datetime.now(UTC) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
     )
 
+    logger.info("Login successful", extra={"user_id": str(user.id)})
     return AuthResponse(user_id=user.id, access_token=access_token, refresh_token=refresh_token)
 
 
