@@ -6,6 +6,7 @@ from uuid import UUID
 import firebase_admin
 from firebase_admin import credentials, exceptions, messaging
 from sqlalchemy import select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -203,7 +204,7 @@ async def _send_notification(
             )
         else:
             logger.info("FCM_%s_SENT: user_id=%s", notification_type, user_id)
-    except (exceptions.FirebaseError, Exception):
+    except (exceptions.FirebaseError, OperationalError, OSError):
         logger.warning("FCM %s failed for user %s", log_label, user_id, exc_info=True)
 
 
