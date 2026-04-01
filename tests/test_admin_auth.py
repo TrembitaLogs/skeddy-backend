@@ -6,6 +6,7 @@ import pytest
 
 from app.admin.auth import AdminAuth
 from app.config import settings
+from app.services.auth_service import hash_password
 
 
 class TestAdminAuthLogin:
@@ -27,13 +28,11 @@ class TestAdminAuthLogin:
         self, auth_backend, mock_request, monkeypatch
     ):
         """Test AdminAuth.login() returns True with correct credentials."""
-        # Set test credentials via monkeypatch
         test_username = "test_admin"
         test_password = "test_secure_password"
         monkeypatch.setattr(settings, "ADMIN_USERNAME", test_username)
-        monkeypatch.setattr(settings, "ADMIN_PASSWORD", test_password)
+        monkeypatch.setattr(settings, "ADMIN_PASSWORD", hash_password(test_password))
 
-        # Mock form data with correct credentials
         mock_form_data = {
             "username": test_username,
             "password": test_password,
@@ -52,9 +51,8 @@ class TestAdminAuthLogin:
         test_username = "test_admin"
         test_password = "test_secure_password"
         monkeypatch.setattr(settings, "ADMIN_USERNAME", test_username)
-        monkeypatch.setattr(settings, "ADMIN_PASSWORD", test_password)
+        monkeypatch.setattr(settings, "ADMIN_PASSWORD", hash_password(test_password))
 
-        # Mock form data with wrong username
         mock_form_data = {
             "username": "wrong_admin",
             "password": test_password,
@@ -73,9 +71,8 @@ class TestAdminAuthLogin:
         test_username = "test_admin"
         test_password = "test_secure_password"
         monkeypatch.setattr(settings, "ADMIN_USERNAME", test_username)
-        monkeypatch.setattr(settings, "ADMIN_PASSWORD", test_password)
+        monkeypatch.setattr(settings, "ADMIN_PASSWORD", hash_password(test_password))
 
-        # Mock form data with wrong password
         mock_form_data = {
             "username": test_username,
             "password": "wrong_password",
@@ -94,9 +91,8 @@ class TestAdminAuthLogin:
         test_username = "test_admin"
         test_password = "test_secure_password"
         monkeypatch.setattr(settings, "ADMIN_USERNAME", test_username)
-        monkeypatch.setattr(settings, "ADMIN_PASSWORD", test_password)
+        monkeypatch.setattr(settings, "ADMIN_PASSWORD", hash_password(test_password))
 
-        # Mock form data with both wrong credentials
         mock_form_data = {
             "username": "wrong_admin",
             "password": "wrong_password",

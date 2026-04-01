@@ -1,12 +1,12 @@
 """Authentication backend for admin panel."""
 
-import hashlib
 import secrets
 
 from sqladmin.authentication import AuthenticationBackend
 from starlette.requests import Request
 
 from app.config import settings
+from app.services.auth_service import verify_password
 
 
 class AdminAuth(AuthenticationBackend):
@@ -28,13 +28,9 @@ class AdminAuth(AuthenticationBackend):
         if not isinstance(username, str) or not isinstance(password, str):
             return False
 
-        # Hash password for comparison
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        expected_hash = hashlib.sha256(settings.ADMIN_PASSWORD.encode()).hexdigest()
-
-        # Validate credentials using timing-safe comparison
-        if username == settings.ADMIN_USERNAME and secrets.compare_digest(
-            password_hash, expected_hash
+        # Validate credentials: ADMIN_PASSWORD stores a bcrypt hash
+        if secrets.compare_digest(username, settings.ADMIN_USERNAME) and verify_password(
+            password, settings.ADMIN_PASSWORD
         ):
             request.session.update({"admin_authenticated": True})
             return True

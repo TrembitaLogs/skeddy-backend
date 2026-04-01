@@ -64,9 +64,12 @@ class Settings(BaseSettings):
     HEALTH_CHECK_INTERVAL_MINUTES: int = 5
     OFFLINE_NOTIFICATION_THRESHOLD_MINUTES: int = 30
 
+    # CORS
+    CORS_ORIGINS: str = ""  # comma-separated allowed origins, e.g. "https://admin.skeddy.app"
+
     # Admin Panel
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = ""
+    ADMIN_PASSWORD: str = ""  # bcrypt hash of admin password
     ADMIN_SECRET_KEY: str = ""
 
     # Backup
