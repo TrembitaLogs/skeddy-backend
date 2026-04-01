@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.middleware.request_id import user_id_ctx
 from app.models.user import User
 from app.services.auth_service import decode_access_token
 
@@ -30,6 +31,9 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="USER_NOT_FOUND")
+
+    # Inject user_id into logging context for all downstream log messages
+    user_id_ctx.set(str(user.id))
 
     # Update language from X-Language header if changed
     x_language = request.headers.get("X-Language")

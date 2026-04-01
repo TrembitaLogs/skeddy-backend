@@ -18,6 +18,7 @@ from app.services.credit_service import add_credits
 from app.services.fcm_service import send_balance_adjusted
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("audit.admin")
 
 
 class CreditBalanceAdmin(ModelView, model=CreditBalance):
@@ -134,6 +135,19 @@ class CreditBalanceAdmin(ModelView, model=CreditBalance):
                             description=form_description,
                         )
                         success = f"Balance adjusted by {amount:+d}. New balance: {new_balance}."
+                        audit_logger.info(
+                            "Admin balance adjustment: user=%s amount=%+d new_balance=%d",
+                            user_id,
+                            amount,
+                            new_balance,
+                            extra={
+                                "action": "balance_adjustment",
+                                "target_user_id": str(user_id),
+                                "amount": amount,
+                                "new_balance": new_balance,
+                                "description": form_description,
+                            },
+                        )
                         current_balance = new_balance
                         form_amount = ""
                         form_description = ""

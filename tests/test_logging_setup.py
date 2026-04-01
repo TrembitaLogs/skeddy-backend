@@ -4,7 +4,7 @@ from io import StringIO
 
 from pythonjsonlogger.json import JsonFormatter
 
-from app.middleware.logging import RequestIdFilter, setup_logging
+from app.middleware.logging import RequestContextFilter, setup_logging
 from app.middleware.request_id import request_id_ctx
 
 
@@ -134,12 +134,12 @@ class TestRequestIdInLogs:
         assert record["request_id"] is None
 
 
-class TestRequestIdFilter:
-    """Tests for the RequestIdFilter logging filter."""
+class TestRequestContextFilter:
+    """Tests for the RequestContextFilter logging filter."""
 
     def test_filter_injects_request_id(self):
         """Filter should add request_id attribute to LogRecord."""
-        f = RequestIdFilter()
+        f = RequestContextFilter()
         record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
 
         token = request_id_ctx.set("filter-test-id")
@@ -153,7 +153,7 @@ class TestRequestIdFilter:
 
     def test_filter_returns_none_without_context(self):
         """Filter should set request_id=None when context not set."""
-        f = RequestIdFilter()
+        f = RequestContextFilter()
         record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
 
         result = f.filter(record)

@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.admin import setup_admin
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.middleware.content_type import ContentTypeMiddleware
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.logging import setup_logging
@@ -110,6 +111,7 @@ app.add_middleware(
 )
 app.add_middleware(SessionMiddleware, secret_key=settings.ADMIN_SECRET_KEY)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ContentTypeMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 setup_rate_limiter(app)
