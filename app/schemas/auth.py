@@ -75,17 +75,17 @@ class RequestResetRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    """Reset password with 6-digit code schema."""
+    """Reset password with verification code schema."""
 
     email: EmailStr
-    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+    code: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$")
     new_password: str = Field(min_length=8)
 
 
 class VerifyEmailRequest(BaseModel):
-    """Verify email with 6-digit code schema."""
+    """Verify email with verification code schema."""
 
-    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+    code: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$")
 
 
 class DeleteAccountRequest(BaseModel):

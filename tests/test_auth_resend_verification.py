@@ -23,7 +23,7 @@ VERIFY_EMAIL_URL = "/api/v1/auth/verify-email"
 
 _TEST_PASSWORD = "securePass1"
 _TEST_EMAIL = "resend@example.com"
-_VERIFY_CODE = "593817"
+_VERIFY_CODE = "59381723"
 
 
 async def _register_and_get_auth(app_client, email=_TEST_EMAIL):
@@ -87,7 +87,7 @@ async def test_resend_verification_sends_email_with_code(app_client, fake_redis)
     mock_send.assert_called_once()
     to_email, code, _lang = mock_send.call_args[0]
     assert to_email == "resend-email@example.com"
-    assert len(code) == 6
+    assert len(code) == 8
     assert code.isdigit()
 
 

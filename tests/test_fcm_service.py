@@ -559,7 +559,7 @@ class TestSendCreditsDepleted:
         with patch(
             "app.services.fcm_service.send_push",
             new_callable=AsyncMock,
-            side_effect=Exception("FCM down"),
+            side_effect=OSError("FCM down"),
         ):
             # Should not raise
             await send_credits_depleted(mock_db, user_id)
@@ -658,7 +658,7 @@ class TestSendRideCreditRefunded:
         with patch(
             "app.services.fcm_service.send_push",
             new_callable=AsyncMock,
-            side_effect=Exception("FCM down"),
+            side_effect=OSError("FCM down"),
         ):
             # Should not raise
             await send_ride_credit_refunded(mock_db, user_id, ride_id, 2, 15)

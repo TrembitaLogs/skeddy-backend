@@ -111,7 +111,7 @@ async def send_push(
                 {k: v for k, v in string_data.items()}
             )
             string_data["body"] = template.body.format_map({k: v for k, v in string_data.items()})
-    except (KeyError, AttributeError, ValueError):
+    except Exception:
         logger.warning("Failed to resolve push template for %s", notification_type, exc_info=True)
 
     message = messaging.Message(data=string_data, token=fcm_token)

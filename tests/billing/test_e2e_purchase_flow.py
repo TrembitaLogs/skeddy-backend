@@ -173,7 +173,7 @@ async def test_purchase_idempotent_replay(authenticated_client, billing_app_conf
 async def test_purchase_google_api_failure(authenticated_client, billing_app_config, db_session):
     """Google API unavailable -> 503 SERVICE_UNAVAILABLE, order FAILED, balance unchanged."""
     auth = authenticated_client
-    mock_svc = make_google_play_mock(verify_error=Exception("Connection timeout"))
+    mock_svc = make_google_play_mock(verify_error=OSError("Connection timeout"))
 
     with patch("app.routers.credits._get_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(

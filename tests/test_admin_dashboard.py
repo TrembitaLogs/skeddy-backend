@@ -158,16 +158,21 @@ class TestAdminPanelAccess:
     @pytest.mark.asyncio
     async def test_admin_login_with_valid_credentials(self, app_client, monkeypatch):
         """Test login with valid credentials creates session."""
-        # Set test credentials
+        import bcrypt
+
+        # Set test credentials (ADMIN_PASSWORD is a bcrypt hash)
         test_username = "test_admin"
         test_password = "test_password123"
+        hashed = bcrypt.hashpw(test_password.encode(), bcrypt.gensalt()).decode()
         monkeypatch.setattr("app.config.settings.ADMIN_USERNAME", test_username)
-        monkeypatch.setattr("app.config.settings.ADMIN_PASSWORD", test_password)
+        monkeypatch.setattr("app.config.settings.ADMIN_PASSWORD", hashed)
 
-        # Submit login form as form data
+        # Submit login form as form data (explicit Content-Type because
+        # app_client has a default application/json header)
         resp = await app_client.post(
             "/admin/login",
             data={"username": test_username, "password": test_password},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
             follow_redirects=False,
         )
 

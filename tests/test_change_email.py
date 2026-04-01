@@ -9,7 +9,7 @@ ME_URL = "/api/v1/auth/me"
 REGISTER_URL = "/api/v1/auth/register"
 
 _TEST_PASSWORD = "securePass1"
-_VERIFY_CODE = "593817"
+_VERIFY_CODE = "59381723"
 
 
 async def _register(app_client, email):
@@ -178,7 +178,7 @@ async def test_verify_email_change_wrong_code_returns_401(app_client, fake_redis
 
     resp = await app_client.post(
         VERIFY_EMAIL_URL,
-        json={"code": "000000"},
+        json={"code": "00000000"},
         headers=_auth(reg["access_token"]),
     )
 

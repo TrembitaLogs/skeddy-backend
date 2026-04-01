@@ -102,9 +102,9 @@ async def test_register_sends_verification_email_with_code(mock_send, app_client
     assert call_args[0][0] == "email-check@example.com"
 
     code = call_args[0][1]
-    assert len(code) == 6
+    assert len(code) == 8
     assert code.isdigit()
-    assert 100000 <= int(code) <= 999999
+    assert 10000000 <= int(code) <= 99999999
 
 
 # --- Test Strategy: 4. GET /auth/me → email_verified: false ---
@@ -167,7 +167,7 @@ async def test_register_then_verify_email_full_flow(mock_send, app_client, fake_
 @patch(
     "app.routers.auth.send_verification_code",
     new_callable=AsyncMock,
-    side_effect=Exception("SMTP connection failed"),
+    side_effect=OSError("SMTP connection failed"),
 )
 async def test_register_smtp_failure_still_returns_201(mock_send, app_client):
     """Registration succeeds even when verification email fails to send."""
@@ -190,7 +190,7 @@ async def test_register_smtp_failure_still_returns_201(mock_send, app_client):
 @patch(
     "app.routers.auth.send_verification_code",
     new_callable=AsyncMock,
-    side_effect=Exception("SMTP connection failed"),
+    side_effect=OSError("SMTP connection failed"),
 )
 async def test_register_smtp_failure_code_still_in_redis(mock_send, app_client, fake_redis):
     """When SMTP fails, the verification code is still stored in Redis."""

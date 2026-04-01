@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 
 from app.models.ride import Ride
 
@@ -607,7 +608,7 @@ async def test_create_ride_fcm_exception_still_saves_ride(app_client, db_session
     with patch(
         "app.routers.rides.send_push",
         new_callable=AsyncMock,
-        side_effect=TimeoutError("FCM request timed out"),
+        side_effect=OperationalError("FCM request timed out", {}, None),
     ):
         resp = await app_client.post(
             RIDES_URL,
@@ -642,7 +643,7 @@ async def test_create_ride_fcm_exception_logs_warning_with_ride_id(app_client, c
         patch(
             "app.routers.rides.send_push",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("connection refused"),
+            side_effect=OperationalError("connection refused", {}, None),
         ),
         caplog.at_level(logging.WARNING, logger="app.routers.rides"),
     ):
@@ -1882,7 +1883,7 @@ async def test_create_ride_credits_depleted_fcm_failure_still_saves(app_client, 
         patch(
             "app.routers.rides.send_credits_depleted",
             new_callable=AsyncMock,
-            side_effect=Exception("FCM down"),
+            side_effect=OperationalError("FCM down", {}, None),
         ),
     ):
         resp = await app_client.post(

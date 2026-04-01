@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.credit_balance import CreditBalance
@@ -281,7 +282,7 @@ class TestProcessUserVerifications:
         with patch(
             "app.tasks.ride_verification.send_ride_credit_refunded",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("FCM down"),
+            side_effect=OperationalError("FCM down", {}, None),
         ):
             # Should NOT raise
             result = await process_user_verifications(user.id, db_session, fake_redis)

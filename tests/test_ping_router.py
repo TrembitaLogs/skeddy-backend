@@ -5,6 +5,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 
 from app.models.accept_failure import AcceptFailure
 from app.models.app_config import AppConfig
@@ -890,7 +891,7 @@ async def test_ping_fcm_failure_does_not_block_refund(app_client, db_session):
     with patch(
         "app.routers.ping.send_ride_credit_refunded",
         new_callable=AsyncMock,
-        side_effect=Exception("FCM network error"),
+        side_effect=OperationalError("FCM network error", {}, None),
     ):
         resp = await app_client.post(
             PING_URL,
