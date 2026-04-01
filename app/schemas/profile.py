@@ -12,7 +12,6 @@ class UpdateProfileRequest(BaseModel):
     """
 
     phone_number: str | None = None
-    license_number: str | None = None
 
     @field_validator("phone_number")
     @classmethod
@@ -21,16 +20,6 @@ class UpdateProfileRequest(BaseModel):
             return v
         if not re.match(r"^\+[0-9]{7,15}$", v):
             raise ValueError("INVALID_PHONE_FORMAT")
-        return v
-
-    @field_validator("license_number")
-    @classmethod
-    def validate_license_not_empty(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        v = v.strip()
-        if not v:
-            raise ValueError("INVALID_LICENSE_FORMAT")
         return v
 
 

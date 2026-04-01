@@ -85,7 +85,7 @@ async def test_resend_verification_sends_email_with_code(app_client, fake_redis)
 
     assert response.status_code == 200
     mock_send.assert_called_once()
-    to_email, code = mock_send.call_args[0]
+    to_email, code, _lang = mock_send.call_args[0]
     assert to_email == "resend-email@example.com"
     assert len(code) == 6
     assert code.isdigit()

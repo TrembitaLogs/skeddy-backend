@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.app_config import AppConfig
+from app.models.email_template import EmailTemplate as EmailTemplateModel
 from app.models.push_template import PushTemplate as PushTemplateModel
 from app.schemas.billing_config import (
     CreditProductsConfig,
@@ -34,6 +35,7 @@ CACHE_KEY_CREDIT_PRODUCTS = "app_config:credit_products"
 CACHE_KEY_RIDE_CREDIT_TIERS = "app_config:ride_credit_tiers"
 CACHE_KEY_REGISTRATION_BONUS = "app_config:registration_bonus"
 CACHE_KEY_PUSH_TEMPLATES = "app_config:push_templates"
+CACHE_KEY_EMAIL_TEMPLATES = "app_config:email_templates"
 CACHE_TTL = 300  # 5 minutes (Redis)
 IN_MEMORY_TTL = 600  # 10 minutes (fallback when Redis is unavailable)
 
@@ -614,6 +616,71 @@ async def invalidate_push_templates(redis: Redis) -> None:
         await redis.delete(CACHE_KEY_PUSH_TEMPLATES)
     except RedisError:
         logger.warning("Redis unavailable when invalidating %s", CACHE_KEY_PUSH_TEMPLATES)
+
+
+# ---------------------------------------------------------------------------
+# Email templates
+# ---------------------------------------------------------------------------
+
+
+async def get_email_templates(
+    db: AsyncSession, redis: Redis
+) -> dict[str, dict[str, dict[str, str]]]:
+    """Return email templates from email_templates table.
+
+    Resolution order: Redis cache -> DB.
+    Returns: {email_type: {lang: {subject, body}}}
+    """
+    raw_json: str | None = None
+
+    # 1. Try Redis cache
+    try:
+        cached = await redis.get(CACHE_KEY_EMAIL_TEMPLATES)
+        if cached is not None:
+            raw_json = cached
+    except RedisError:
+        logger.warning("Redis unavailable when reading %s", CACHE_KEY_EMAIL_TEMPLATES)
+        mem_value = _memory_cache.get(CACHE_KEY_EMAIL_TEMPLATES)
+        if mem_value is not None:
+            return mem_value  # type: ignore[no-any-return]
+
+    # 2. Try DB
+    if raw_json is None:
+        result = await db.execute(select(EmailTemplateModel))
+        rows = result.scalars().all()
+
+        if rows:
+            data = {}
+            for row in rows:
+                data[row.email_type] = {
+                    "en": {"subject": row.subject_en, "body": row.body_en},
+                    "es": {"subject": row.subject_es, "body": row.body_es},
+                }
+            raw_json = json.dumps(data)
+            try:
+                await redis.setex(CACHE_KEY_EMAIL_TEMPLATES, CACHE_TTL, raw_json)
+            except RedisError:
+                logger.warning("Redis unavailable when caching %s", CACHE_KEY_EMAIL_TEMPLATES)
+
+    # 3. Parse
+    if raw_json is not None:
+        try:
+            parsed = json.loads(raw_json)
+            _memory_cache[CACHE_KEY_EMAIL_TEMPLATES] = parsed
+            return dict(parsed)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("Invalid email templates JSON: %s", exc)
+
+    return {}
+
+
+async def invalidate_email_templates(redis: Redis) -> None:
+    """Invalidate email templates cache after admin edit."""
+    _memory_cache.pop(CACHE_KEY_EMAIL_TEMPLATES, None)
+    try:
+        await redis.delete(CACHE_KEY_EMAIL_TEMPLATES)
+    except RedisError:
+        logger.warning("Redis unavailable when invalidating %s", CACHE_KEY_EMAIL_TEMPLATES)
 
 
 # ---------------------------------------------------------------------------

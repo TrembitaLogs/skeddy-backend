@@ -140,66 +140,6 @@ async def test_get_profile_shows_updated_phone(app_client):
     assert me.json()["phone_number"] == phone
 
 
-# --- Test Strategy 6: PATCH /profile with license_number ---
-
-
-async def test_update_license_returns_200(app_client):
-    """PATCH /profile with license_number → 200, visible in /me."""
-    reg = await _register_and_get_tokens(app_client, email="license1@example.com")
-
-    response = await app_client.patch(
-        PROFILE_URL,
-        json={"license_number": "DL123456"},
-        headers=_auth_header(reg["access_token"]),
-    )
-
-    assert response.status_code == 200
-
-    me = await app_client.get(ME_URL, headers=_auth_header(reg["access_token"]))
-    assert me.json()["license_number"] == "DL123456"
-
-
-async def test_update_license_taken_by_another_user_returns_409(app_client):
-    """PATCH /profile with license belonging to another user → 409."""
-    reg1 = await _register_and_get_tokens(app_client, email="license2a@example.com")
-    reg2 = await _register_and_get_tokens(app_client, email="license2b@example.com")
-
-    await app_client.patch(
-        PROFILE_URL,
-        json={"license_number": "SHARED123"},
-        headers=_auth_header(reg1["access_token"]),
-    )
-
-    response = await app_client.patch(
-        PROFILE_URL,
-        json={"license_number": "SHARED123"},
-        headers=_auth_header(reg2["access_token"]),
-    )
-
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "LICENSE_ALREADY_EXISTS"
-
-
-# --- Test Strategy 7: PATCH /profile with both fields at once ---
-
-
-async def test_update_phone_and_license_together(app_client):
-    """PATCH /profile with both phone and license → 200, both updated."""
-    reg = await _register_and_get_tokens(app_client, email="both1@example.com")
-
-    response = await app_client.patch(
-        PROFILE_URL,
-        json={"phone_number": "+14155551234", "license_number": "BOTH789"},
-        headers=_auth_header(reg["access_token"]),
-    )
-
-    assert response.status_code == 200
-
-    me = await app_client.get(ME_URL, headers=_auth_header(reg["access_token"]))
-    assert me.json()["phone_number"] == "+14155551234"
-    assert me.json()["license_number"] == "BOTH789"
-
-
 # --- Additional: no auth → 401 ---
 
 

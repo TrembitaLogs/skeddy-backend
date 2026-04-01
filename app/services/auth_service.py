@@ -162,17 +162,25 @@ async def delete_reset_code(redis: Redis, email: str) -> None:
     await redis.delete(f"{_RESET_CODE_PREFIX}{email}")
 
 
-async def store_verify_code(redis: Redis, user_id: str, code: str) -> None:
+async def store_verify_code(
+    redis: Redis, user_id: str, code: str, *, new_email: str | None = None
+) -> None:
     """Store an email verification code hash in Redis with 24-hour TTL.
 
     Any previous unused code for the same user is implicitly overwritten
     because the key ``verify_code:{user_id}`` is the same.
+
+    If ``new_email`` is provided, it is stored alongside the code so that
+    ``verify-email`` can apply the email change upon successful verification.
     """
     code_hash = hashlib.sha256(code.encode()).hexdigest()
+    data: dict = {"code_hash": code_hash, "attempts": 0}
+    if new_email is not None:
+        data["new_email"] = new_email
     await redis.setex(
         f"{_VERIFY_CODE_PREFIX}{user_id}",
         _VERIFY_CODE_TTL,
-        json.dumps({"code_hash": code_hash, "attempts": 0}),
+        json.dumps(data),
     )
 
 
