@@ -150,8 +150,13 @@ async def login(
 
     # Always run bcrypt verify to prevent timing-based email enumeration
     password_valid = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
     if not user or not password_valid:
-        logger.warning("Login failed: invalid credentials", extra={"email": body.email})
+        logger.warning(
+            "Login failed: invalid credentials",
+            extra={"email": body.email, "ip": client_ip, "user_agent": user_agent},
+        )
         raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
 
     # Generate token pair
@@ -164,7 +169,10 @@ async def login(
         datetime.now(UTC) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
     )
 
-    logger.info("Login successful", extra={"user_id": str(user.id)})
+    logger.info(
+        "Login successful",
+        extra={"user_id": str(user.id), "ip": client_ip, "user_agent": user_agent},
+    )
     return AuthResponse(user_id=user.id, access_token=access_token, refresh_token=refresh_token)
 
 
@@ -479,12 +487,25 @@ async def search_login_endpoint(
     On success, returns a long-lived device_token for subsequent device auth.
     Logging in on a new device replaces the old one (old device gets 401 on next ping).
     """
-    device_token, user_id = await search_login(
-        email=body.email,
-        password=body.password,
-        device_id=body.device_id,
-        timezone_str=body.timezone,
-        db=db,
-        device_model=body.device_model,
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    try:
+        device_token, user_id = await search_login(
+            email=body.email,
+            password=body.password,
+            device_id=body.device_id,
+            timezone_str=body.timezone,
+            db=db,
+            device_model=body.device_model,
+        )
+    except HTTPException:
+        logger.warning(
+            "Search login failed",
+            extra={"email": body.email, "ip": client_ip, "user_agent": user_agent},
+        )
+        raise
+    logger.info(
+        "Search login successful",
+        extra={"user_id": str(user_id), "ip": client_ip, "user_agent": user_agent},
     )
     return SearchLoginResponse(device_token=device_token, user_id=user_id)

@@ -173,6 +173,13 @@ class UserAdmin(ModelView, model=User):
             extra={"action": action, "email": model.email},
         )
 
+    async def after_model_delete(self, model: User, request: Request) -> None:
+        audit_logger.info(
+            "Admin user deleted: %s",
+            model.email,
+            extra={"action": "deleted", "email": model.email, "user_id": str(model.id)},
+        )
+
 
 class PairedDeviceAdmin(ModelView, model=PairedDevice):
     """Admin view for PairedDevice model."""
@@ -203,6 +210,28 @@ class PairedDeviceAdmin(ModelView, model=PairedDevice):
     can_create = True
     can_edit = True
     can_delete = True
+
+    async def after_model_change(
+        self, data: dict[str, Any], model: PairedDevice, is_created: bool, request: Request
+    ) -> None:
+        action = "created" if is_created else "updated"
+        audit_logger.info(
+            "Admin paired device %s: %s",
+            action,
+            model.device_id,
+            extra={"action": action, "device_id": model.device_id, "user_id": str(model.user_id)},
+        )
+
+    async def after_model_delete(self, model: PairedDevice, request: Request) -> None:
+        audit_logger.info(
+            "Admin paired device deleted: %s",
+            model.device_id,
+            extra={
+                "action": "deleted",
+                "device_id": model.device_id,
+                "user_id": str(model.user_id),
+            },
+        )
 
 
 class SearchFiltersAdmin(ModelView, model=SearchFilters):
@@ -266,6 +295,24 @@ class RideAdmin(ModelView, model=Ride):
     can_edit = True
     can_delete = True
 
+    async def after_model_change(
+        self, data: dict[str, Any], model: Ride, is_created: bool, request: Request
+    ) -> None:
+        action = "created" if is_created else "updated"
+        audit_logger.info(
+            "Admin ride %s: %s",
+            action,
+            model.id,
+            extra={"action": action, "ride_id": str(model.id), "user_id": str(model.user_id)},
+        )
+
+    async def after_model_delete(self, model: Ride, request: Request) -> None:
+        audit_logger.info(
+            "Admin ride deleted: %s",
+            model.id,
+            extra={"action": "deleted", "ride_id": str(model.id), "user_id": str(model.user_id)},
+        )
+
 
 class AcceptFailureAdmin(ModelView, model=AcceptFailure):
     """Admin view for AcceptFailure model."""
@@ -293,6 +340,30 @@ class AcceptFailureAdmin(ModelView, model=AcceptFailure):
     can_edit = True
     can_delete = True
 
+    async def after_model_change(
+        self, data: dict[str, Any], model: AcceptFailure, is_created: bool, request: Request
+    ) -> None:
+        audit_logger.info(
+            "Admin accept failure updated: %s",
+            model.id,
+            extra={
+                "action": "updated",
+                "failure_id": str(model.id),
+                "user_id": str(model.user_id),
+            },
+        )
+
+    async def after_model_delete(self, model: AcceptFailure, request: Request) -> None:
+        audit_logger.info(
+            "Admin accept failure deleted: %s",
+            model.id,
+            extra={
+                "action": "deleted",
+                "failure_id": str(model.id),
+                "user_id": str(model.user_id),
+            },
+        )
+
 
 class RefreshTokenAdmin(ModelView, model=RefreshToken):
     """Admin view for RefreshToken model."""
@@ -319,6 +390,13 @@ class RefreshTokenAdmin(ModelView, model=RefreshToken):
     can_create = False
     can_edit = False
     can_delete = True
+
+    async def after_model_delete(self, model: RefreshToken, request: Request) -> None:
+        audit_logger.info(
+            "Admin refresh token deleted: user=%s",
+            model.user_id,
+            extra={"action": "deleted", "user_id": str(model.user_id)},
+        )
 
 
 class LegacyCreditAdmin(ModelView, model=LegacyCredit):
