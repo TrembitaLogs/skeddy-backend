@@ -1,5 +1,7 @@
+import logging
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,7 +19,7 @@ def _get_app_version() -> str:
         with open(pyproject, "rb") as f:
             data = tomllib.load(f)
         return str(data["project"]["version"])
-    except Exception:
+    except (FileNotFoundError, KeyError, OSError, ValueError):
         return "dev"
 
 
@@ -82,8 +84,27 @@ class Settings(BaseSettings):
     PORT: int = 8000
     DEBUG: bool = False
 
+    # Environment identifier (dev, staging, production)
+    ENVIRONMENT: str = "dev"
+
     # App version (set via APP_VERSION env var in production, falls back to pyproject.toml)
     APP_VERSION: str = _get_app_version()
+
+    @model_validator(mode="after")
+    def _warn_missing_production_settings(self) -> "Settings":
+        """Log warnings for settings that should be set in production."""
+        if self.ENVIRONMENT == "dev":
+            return self
+        _logger = logging.getLogger(__name__)
+        if not self.ADMIN_PASSWORD:
+            _logger.warning("ADMIN_PASSWORD is not set — admin panel login is disabled")
+        if not self.ADMIN_SECRET_KEY:
+            _logger.warning("ADMIN_SECRET_KEY is not set — sessions will use an empty key")
+        if not self.CORS_ORIGINS:
+            _logger.warning("CORS_ORIGINS is not set — no origins will be allowed")
+        if not self.SENTRY_DSN:
+            _logger.warning("SENTRY_DSN is not set — error tracking is disabled")
+        return self
 
 
 settings = Settings()

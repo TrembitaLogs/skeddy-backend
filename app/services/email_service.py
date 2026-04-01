@@ -3,6 +3,7 @@ from email.message import EmailMessage
 
 import aiosmtplib
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -130,9 +131,24 @@ async def _get_templates(db: AsyncSession | None, redis: Redis | None) -> dict:
             from app.services.config_service import get_email_templates
 
             return await get_email_templates(db, redis)
-        except Exception:
-            logger.warning("Failed to load email templates from DB, using fallbacks")
+        except (OSError, RedisError) as exc:
+            logger.warning("Failed to load email templates from DB, using fallbacks: %s", exc)
     return _FALLBACK_TEMPLATES
+
+
+async def _send_code_email(
+    to_email: str,
+    code: str,
+    template_type: str,
+    log_label: str,
+    language: str = "en",
+    db: AsyncSession | None = None,
+    redis: Redis | None = None,
+) -> None:
+    """Send a templated code email (shared logic for all code-based emails)."""
+    templates = await _get_templates(db, redis)
+    t = _resolve_template(templates, template_type, language)
+    await _send_email(to_email, t["subject"], t["body"].format(code=code), log_label)
 
 
 async def send_password_reset_code(
@@ -142,10 +158,10 @@ async def send_password_reset_code(
     db: AsyncSession | None = None,
     redis: Redis | None = None,
 ) -> None:
-    """Send a password reset email containing a 6-digit verification code."""
-    templates = await _get_templates(db, redis)
-    t = _resolve_template(templates, "PASSWORD_RESET", language)
-    await _send_email(to_email, t["subject"], t["body"].format(code=code), "Password reset code")
+    """Send a password reset email containing a verification code."""
+    await _send_code_email(
+        to_email, code, "PASSWORD_RESET", "Password reset code", language, db, redis
+    )
 
 
 async def send_email_change_code(
@@ -156,9 +172,9 @@ async def send_email_change_code(
     redis: Redis | None = None,
 ) -> None:
     """Send a verification code for email change request."""
-    templates = await _get_templates(db, redis)
-    t = _resolve_template(templates, "EMAIL_CHANGE", language)
-    await _send_email(to_email, t["subject"], t["body"].format(code=code), "Email change code")
+    await _send_code_email(
+        to_email, code, "EMAIL_CHANGE", "Email change code", language, db, redis
+    )
 
 
 async def send_verification_code(
@@ -169,6 +185,6 @@ async def send_verification_code(
     redis: Redis | None = None,
 ) -> None:
     """Send an email verification code after registration."""
-    templates = await _get_templates(db, redis)
-    t = _resolve_template(templates, "VERIFICATION", language)
-    await _send_email(to_email, t["subject"], t["body"].format(code=code), "Verification code")
+    await _send_code_email(
+        to_email, code, "VERIFICATION", "Verification code", language, db, redis
+    )

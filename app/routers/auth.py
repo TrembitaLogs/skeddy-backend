@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+import aiosmtplib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -132,7 +133,7 @@ async def register(
     try:
         await store_verify_code(redis, str(user.id), code)
         await send_verification_code(body.email, code, user.language, db, redis)
-    except Exception:
+    except (aiosmtplib.SMTPException, RedisError, OSError):
         logger.warning("Failed to send verification email for user %s", user.id)
 
     return AuthResponse(user_id=user.id, access_token=access_token, refresh_token=refresh_token)
@@ -301,7 +302,7 @@ async def change_email(
     # Send verification code to the NEW email address
     try:
         await send_email_change_code(body.new_email, code, current_user.language, db, redis)
-    except Exception:
+    except (aiosmtplib.SMTPException, RedisError, OSError):
         logger.warning("Failed to send email change verification for user %s", current_user.id)
 
     return OkResponse()
@@ -335,7 +336,7 @@ async def resend_verification(
         await send_verification_code(
             current_user.email, code, current_user.language, db=None, redis=redis
         )
-    except Exception:
+    except (aiosmtplib.SMTPException, RedisError, OSError):
         logger.warning("Failed to send verification email for user %s", current_user.id)
 
     return OkResponse()
@@ -414,7 +415,7 @@ async def request_reset(
 
         try:
             await send_password_reset_code(body.email, code, user.language, db, redis)
-        except Exception:
+        except (aiosmtplib.SMTPException, RedisError, OSError):
             logger.warning("Failed to send reset email for password reset request")
 
     logger.info("Password reset requested")

@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.paired_device import PairedDevice
 from app.models.search_filters import SearchFilters
@@ -187,7 +188,7 @@ async def test_check_device_health_handles_db_error():
 
     @asynccontextmanager
     async def mock_session_factory():
-        raise RuntimeError("DB connection failed")
+        raise OperationalError("SELECT 1", {}, Exception("DB connection failed"))
         yield  # pragma: no cover
 
     with (

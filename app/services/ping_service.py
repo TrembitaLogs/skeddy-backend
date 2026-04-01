@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.accept_failure import AcceptFailure as AcceptFailureModel
@@ -311,7 +311,7 @@ async def save_accept_failures(
         async with db.begin_nested():
             db.add_all(records)
             await db.flush()
-    except Exception:
+    except (OperationalError, IntegrityError):
         logger.error(
             "Failed to save %d accept failures for user %s",
             len(records),

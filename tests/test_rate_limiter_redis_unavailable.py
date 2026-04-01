@@ -20,6 +20,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request, Response
 from httpx import ASGITransport, AsyncClient
+from redis.exceptions import RedisError
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
@@ -97,7 +98,7 @@ async def test_auth_login_succeeds_when_storage_unavailable(failopen_app):
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
-    with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.post("/auth/login")
             assert r.status_code == 200
@@ -110,7 +111,7 @@ async def test_filters_endpoint_succeeds_when_storage_unavailable(failopen_app):
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
-    with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.get("/filters")
             assert r.status_code == 200
@@ -126,7 +127,7 @@ async def test_ping_succeeds_when_storage_unavailable(failopen_app):
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
-    with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.post("/ping", headers={"X-Device-ID": "test-device-001"})
             assert r.status_code == 200
@@ -147,7 +148,7 @@ async def test_storage_failure_is_logged(failopen_app, caplog):
         patch.object(
             test_limiter._limiter,
             "hit",
-            side_effect=Exception("Connection refused"),
+            side_effect=RedisError("Connection refused"),
         ),
     ):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -172,7 +173,7 @@ async def test_rate_limiting_resumes_after_storage_recovery(failopen_app):
         with patch.object(
             test_limiter._limiter,
             "hit",
-            side_effect=Exception("Connection refused"),
+            side_effect=RedisError("Connection refused"),
         ):
             for _ in range(5):
                 r = await client.post("/auth/login")
@@ -196,7 +197,7 @@ async def test_multiple_requests_succeed_during_storage_outage(failopen_app):
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
-    with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             # Well beyond the 3/minute Redis limit, but within the 30/min
             # in-memory fallback threshold — all should succeed
@@ -216,7 +217,7 @@ async def test_fallback_enforces_limit_when_threshold_exceeded(failopen_app):
     app, test_limiter = failopen_app
     transport = ASGITransport(app=app)
 
-    with patch.object(test_limiter._limiter, "hit", side_effect=Exception("Connection refused")):
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             # Send requests up to the fallback limit
             for i in range(_FALLBACK_MAX_REQUESTS):

@@ -245,7 +245,7 @@ async def add_credits(
         threshold = await get_max_ride_credits(db, redis)
         if new_balance >= threshold:
             await redis.delete(low_balance_notified_key(user_id))
-    except Exception:
+    except (RedisError, OperationalError):
         logger.warning(
             "Failed to clear low_balance_notified for user %s",
             user_id,

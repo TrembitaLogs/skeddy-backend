@@ -13,8 +13,10 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+from firebase_admin import exceptions as firebase_exceptions
 from redis.asyncio import Redis
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -80,7 +82,7 @@ async def process_user_verifications(user_id: UUID, db: AsyncSession, redis: Red
                     refund_info["credits_refunded"],
                     refund_info["new_balance"],
                 )
-            except Exception:
+            except (firebase_exceptions.FirebaseError, OperationalError):
                 logger.warning(
                     "FCM RIDE_CREDIT_REFUNDED failed in verification fallback for ride %s",
                     refund_info["ride_id"],

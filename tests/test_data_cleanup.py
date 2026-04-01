@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.accept_failure import AcceptFailure
 from app.models.credit_transaction import CreditTransaction
@@ -329,7 +330,7 @@ async def test_cleanup_continues_after_db_error():
 
     @asynccontextmanager
     async def mock_session_factory():
-        raise RuntimeError("DB connection failed")
+        raise OperationalError("SELECT 1", {}, Exception("DB connection failed"))
         yield  # pragma: no cover
 
     with (
@@ -646,7 +647,7 @@ async def test_rides_not_deleted_when_reference_clearing_fails():
         patch(
             "app.tasks.data_cleanup.clear_ride_reference_ids",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("DB error during UPDATE"),
+            side_effect=OperationalError("UPDATE", {}, Exception("DB error during UPDATE")),
         ) as mock_clear_refs,
         patch(
             "app.tasks.data_cleanup.delete_old_rides",

@@ -3,7 +3,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
+from firebase_admin import exceptions as firebase_exceptions
 from redis.asyncio import Redis
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -99,7 +101,7 @@ async def ping(
                     refund_info["credits_refunded"],
                     refund_info["new_balance"],
                 )
-            except Exception:
+            except (firebase_exceptions.FirebaseError, OperationalError):
                 logger.warning(
                     "FCM RIDE_CREDIT_REFUNDED failed in ping handler for ride %s",
                     refund_info["ride_id"],

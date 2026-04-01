@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import OperationalError
 
 from app.database import AsyncSessionLocal
 from app.models.accept_failure import AcceptFailure
@@ -112,7 +113,7 @@ async def cleanup_old_data() -> None:
                     )
                 else:
                     logger.debug("Data cleanup: no old records found")
-        except Exception:
+        except OperationalError:
             logger.exception("Data cleanup error")
 
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)

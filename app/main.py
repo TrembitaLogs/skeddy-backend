@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
     # Startup
     try:
         initialize_firebase()
-    except Exception:
+    except (ValueError, FileNotFoundError, KeyError):
         logger.warning("Firebase not initialized — push notifications disabled")
 
     health_task = asyncio.create_task(check_device_health())
@@ -129,13 +129,13 @@ async def health_check():
             await session.execute(text("SELECT 1"))
         postgres_ok = True
     except Exception:
-        pass
+        logger.warning("Health check: PostgreSQL unavailable", exc_info=True)
 
     try:
         await redis_client.ping()
         redis_ok = True
     except Exception:
-        pass
+        logger.warning("Health check: Redis unavailable", exc_info=True)
 
     status = "ok" if postgres_ok and redis_ok else "degraded"
 
