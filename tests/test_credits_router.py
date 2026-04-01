@@ -292,7 +292,7 @@ async def test_purchase_google_api_unavailable_verify_returns_503(
     db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
     await db_session.flush()
 
-    mock_svc = _mock_gp_service(verify_error=Exception("Connection timeout"))
+    mock_svc = _mock_gp_service(verify_error=OSError("Connection timeout"))
 
     with patch("app.routers.credits._get_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(

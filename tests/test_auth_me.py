@@ -11,7 +11,7 @@ REGISTER_URL = "/api/v1/auth/register"
 VERIFY_EMAIL_URL = "/api/v1/auth/verify-email"
 
 _TEST_PASSWORD = "securePass1"
-_VERIFY_CODE = "593817"
+_VERIFY_CODE = "59381723"
 
 
 async def _register_and_get_auth(app_client, email):

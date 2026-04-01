@@ -25,7 +25,7 @@ REQUEST_RESET_URL = "/api/v1/auth/request-reset"
 _TEST_PASSWORD = "securePass1"
 _NEW_PASSWORD = "newSecurePass2"
 _TEST_EMAIL = "resetpwd@example.com"
-_RESET_CODE = "847291"
+_RESET_CODE = "84729123"
 
 
 async def _register_user(app_client, email=_TEST_EMAIL):
@@ -121,7 +121,7 @@ async def test_reset_password_wrong_code_returns_401(app_client, fake_redis):
 
     response = await app_client.post(
         RESET_PASSWORD_URL,
-        json={"email": "wrongcode@example.com", "code": "000000", "new_password": _NEW_PASSWORD},
+        json={"email": "wrongcode@example.com", "code": "00000000", "new_password": _NEW_PASSWORD},
     )
 
     assert response.status_code == 401
@@ -146,7 +146,7 @@ async def test_reset_password_5_wrong_attempts_invalidates_code(app_client, fake
     for _i in range(5):
         response = await app_client.post(
             RESET_PASSWORD_URL,
-            json={"email": email, "code": "000000", "new_password": _NEW_PASSWORD},
+            json={"email": email, "code": "00000000", "new_password": _NEW_PASSWORD},
         )
         assert response.status_code == 401
 
@@ -186,7 +186,7 @@ async def test_reset_password_short_password_returns_422(app_client, fake_redis)
     """POST /auth/reset-password with new_password < 8 chars → 422."""
     response = await app_client.post(
         RESET_PASSWORD_URL,
-        json={"email": "short@example.com", "code": "123456", "new_password": "short"},
+        json={"email": "short@example.com", "code": "12345678", "new_password": "short"},
     )
 
     assert response.status_code == 422
@@ -201,7 +201,7 @@ async def test_reset_password_redis_unavailable_returns_503(app_client, fake_red
 
     response = await app_client.post(
         RESET_PASSWORD_URL,
-        json={"email": "any@example.com", "code": "123456", "new_password": _NEW_PASSWORD},
+        json={"email": "any@example.com", "code": "12345678", "new_password": _NEW_PASSWORD},
     )
 
     assert response.status_code == 503

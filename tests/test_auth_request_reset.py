@@ -39,11 +39,11 @@ async def test_request_reset_existing_email_sends_code(mock_send, app_client):
     mock_send.assert_awaited_once()
     call_args = mock_send.call_args
     assert call_args[0][0] == _TEST_EMAIL
-    # Second arg is the 6-digit code
+    # Second arg is the 8-digit code
     code = call_args[0][1]
-    assert len(code) == 6
+    assert len(code) == 8
     assert code.isdigit()
-    assert 100000 <= int(code) <= 999999
+    assert 10000000 <= int(code) <= 99999999
 
 
 # --- Test Strategy: 2. Verify Redis: reset_code:{email} with code_hash and attempts=0 ---
@@ -166,7 +166,7 @@ async def test_request_reset_redis_unavailable_returns_503(app_client, fake_redi
 @patch(
     "app.routers.auth.send_password_reset_code",
     new_callable=AsyncMock,
-    side_effect=Exception("SMTP connection failed"),
+    side_effect=OSError("SMTP connection failed"),
 )
 async def test_request_reset_smtp_failure_still_returns_200(mock_send, app_client):
     """POST /auth/request-reset returns 200 even if SMTP fails."""

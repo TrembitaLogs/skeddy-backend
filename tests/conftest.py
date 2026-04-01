@@ -179,7 +179,11 @@ async def app_client(db_session, fake_redis):
     dashboard_mod.AsyncSessionLocal = test_session_maker
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Content-Type": "application/json"},
+    ) as client:
         yield client
 
     dashboard_mod.AsyncSessionLocal = orig_session_local
@@ -263,16 +267,21 @@ async def admin_client(app_client, monkeypatch):
     Returns a SimpleNamespace with:
         .client  - httpx AsyncClient (same as app_client) with admin session
     """
-    # Set test admin credentials
+    # Set test admin credentials (ADMIN_PASSWORD is a bcrypt hash)
+    import bcrypt
+
     test_username = "test_admin"
     test_password = "test_password123"
+    hashed = bcrypt.hashpw(test_password.encode(), bcrypt.gensalt()).decode()
     monkeypatch.setattr("app.config.settings.ADMIN_USERNAME", test_username)
-    monkeypatch.setattr("app.config.settings.ADMIN_PASSWORD", test_password)
+    monkeypatch.setattr("app.config.settings.ADMIN_PASSWORD", hashed)
 
-    # Submit login form as form data
+    # Submit login form as form data (explicit Content-Type because
+    # app_client has a default application/json header)
     resp = await app_client.post(
         "/admin/login",
         data={"username": test_username, "password": test_password},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
         follow_redirects=False,
     )
 

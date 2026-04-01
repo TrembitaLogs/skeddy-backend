@@ -40,10 +40,15 @@ async def test_csrf_allows_api_v1_without_origin(app_client):
 @pytest.mark.asyncio
 async def test_csrf_allows_admin_post_with_valid_referer(app_client):
     """POST to /admin/ with a valid Referer passes CSRF check."""
+    from app.config import settings
+
+    cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+    valid_origin = cors_origins[0] if cors_origins else f"http://{settings.HOST}:{settings.PORT}"
+
     response = await app_client.post(
         "/admin/login",
         data={"username": "a", "password": "b"},
-        headers={"Referer": "http://0.0.0.0:8000/admin/login"},
+        headers={"Referer": f"{valid_origin}/admin/login"},
     )
     # Not 403 — CSRF passed; may be 400/401 due to bad credentials, that's fine
     assert response.status_code != 403

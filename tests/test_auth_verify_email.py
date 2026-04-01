@@ -22,7 +22,7 @@ ME_URL = "/api/v1/auth/me"
 
 _TEST_PASSWORD = "securePass1"
 _TEST_EMAIL = "verify@example.com"
-_VERIFY_CODE = "593817"
+_VERIFY_CODE = "59381723"
 
 
 async def _register_and_get_auth(app_client, email=_TEST_EMAIL):
@@ -132,7 +132,7 @@ async def test_verify_email_wrong_code_returns_401(app_client, fake_redis):
 
     response = await app_client.post(
         VERIFY_EMAIL_URL,
-        json={"code": "000000"},
+        json={"code": "00000000"},
         headers=headers,
     )
 
@@ -157,7 +157,7 @@ async def test_verify_email_5_wrong_attempts_invalidates_code(app_client, fake_r
     for _i in range(5):
         response = await app_client.post(
             VERIFY_EMAIL_URL,
-            json={"code": "000000"},
+            json={"code": "00000000"},
             headers=headers,
         )
         assert response.status_code == 401
@@ -200,7 +200,7 @@ async def test_verify_email_no_jwt_returns_401(app_client):
     """POST /auth/verify-email without Authorization header → 401."""
     response = await app_client.post(
         VERIFY_EMAIL_URL,
-        json={"code": "123456"},
+        json={"code": "12345678"},
     )
 
     assert response.status_code == 401
@@ -217,7 +217,7 @@ async def test_verify_email_redis_unavailable_returns_503(app_client, fake_redis
 
     response = await app_client.post(
         VERIFY_EMAIL_URL,
-        json={"code": "123456"},
+        json={"code": "12345678"},
         headers=headers,
     )
 
