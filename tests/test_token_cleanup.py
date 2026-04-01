@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -192,7 +193,7 @@ async def test_cleanup_continues_after_db_error():
 
     @asynccontextmanager
     async def mock_session_factory():
-        raise RuntimeError("DB connection failed")
+        raise OperationalError("SELECT 1", {}, Exception("DB connection failed"))
         yield  # pragma: no cover
 
     with (

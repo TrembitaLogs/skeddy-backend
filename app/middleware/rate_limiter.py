@@ -25,6 +25,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from redis.exceptions import RedisError
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -71,7 +72,7 @@ class ResilientLimiter(Limiter):
             super()._check_request_limit(request, endpoint_func, in_middleware)
         except RateLimitExceeded:
             raise
-        except Exception:
+        except (RedisError, OSError):
             use_fallback = True
             logger.warning("Rate limit storage unavailable, using in-memory fallback")
         finally:
@@ -145,7 +146,7 @@ def get_user_key(request: Request) -> str:
             user_id = payload.get("sub")
             if user_id:
                 return f"user:{user_id}"
-        except Exception:
+        except (IndexError, ValueError, json.JSONDecodeError):
             pass
     return get_remote_address(request)
 

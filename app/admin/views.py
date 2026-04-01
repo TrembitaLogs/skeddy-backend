@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Any, ClassVar
 
+from redis.exceptions import RedisError
 from sqladmin import ModelView
 from starlette.requests import Request
 from wtforms import Form, PasswordField, TextAreaField
@@ -78,7 +79,7 @@ class AppConfigAdmin(ModelView, model=AppConfig):
 
         try:
             schema_cls.model_validate(parsed)  # type: ignore[attr-defined]
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             raise ValueError(f"Validation failed for '{model.key}': {exc}") from exc
 
     async def after_model_change(
@@ -90,7 +91,7 @@ class AppConfigAdmin(ModelView, model=AppConfig):
 
         try:
             await invalidate_config(model.key, redis_client)
-        except Exception:
+        except (RedisError, OSError):
             logger.warning("Cache invalidation failed for key %s", model.key, exc_info=True)
 
 

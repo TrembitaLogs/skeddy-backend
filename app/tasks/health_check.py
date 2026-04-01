@@ -2,7 +2,10 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+from firebase_admin import exceptions as firebase_exceptions
+from redis.exceptions import RedisError
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
@@ -181,7 +184,7 @@ async def check_device_health() -> None:
                             device.device_id,
                             device.user_id,
                         )
-        except Exception:
+        except (OperationalError, RedisError, firebase_exceptions.FirebaseError):
             logger.exception("Health check error")
 
         await asyncio.sleep(interval)

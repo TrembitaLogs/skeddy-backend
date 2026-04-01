@@ -3,6 +3,7 @@
 import logging
 from typing import Any, ClassVar
 
+from redis.exceptions import RedisError
 from sqladmin import ModelView
 from starlette.requests import Request
 
@@ -54,5 +55,5 @@ class EmailTemplateAdmin(ModelView, model=EmailTemplate):
 
         try:
             await invalidate_email_templates(redis_client)
-        except Exception:
+        except (RedisError, OSError):
             logger.warning("Cache invalidation failed for email templates", exc_info=True)

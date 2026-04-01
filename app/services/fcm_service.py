@@ -110,7 +110,7 @@ async def send_push(
                 {k: v for k, v in string_data.items()}
             )
             string_data["body"] = template.body.format_map({k: v for k, v in string_data.items()})
-    except Exception:
+    except (KeyError, AttributeError, ValueError):
         logger.warning("Failed to resolve push template for %s", notification_type, exc_info=True)
 
     message = messaging.Message(data=string_data, token=fcm_token)
@@ -175,6 +175,38 @@ async def _get_user_push_info(db: AsyncSession, user_id: UUID) -> tuple[str | No
     return row.fcm_token, row.language or "en"
 
 
+async def _send_notification(
+    db: AsyncSession,
+    user_id: UUID,
+    notification_type: str,
+    payload: dict,
+    log_label: str,
+    **extra_log: object,
+) -> None:
+    """Shared fire-and-forget push notification sender.
+
+    Exceptions are caught and logged, never propagated.
+    """
+    try:
+        fcm_token, language = await _get_user_push_info(db, user_id)
+        if not fcm_token:
+            logger.debug("No FCM token for user %s, skipping %s push", user_id, notification_type)
+            return
+
+        await send_push(db, fcm_token, notification_type, payload, user_id, language)
+        if extra_log:
+            logger.info(
+                "FCM_%s_SENT: user_id=%s, %s",
+                notification_type,
+                user_id,
+                ", ".join(f"{k}={v}" for k, v in extra_log.items()),
+            )
+        else:
+            logger.info("FCM_%s_SENT: user_id=%s", notification_type, user_id)
+    except (exceptions.FirebaseError, Exception):
+        logger.warning("FCM %s failed for user %s", log_label, user_id, exc_info=True)
+
+
 async def send_ride_credit_refunded(
     db: AsyncSession,
     user_id: UUID,
@@ -182,55 +214,32 @@ async def send_ride_credit_refunded(
     credits_refunded: int,
     new_balance: int,
 ) -> None:
-    """Send RIDE_CREDIT_REFUNDED push when a ride is verified as CANCELLED.
-
-    Fire-and-forget: exceptions are caught and logged, never propagated.
-    """
-    try:
-        fcm_token, language = await _get_user_push_info(db, user_id)
-        if not fcm_token:
-            logger.debug(
-                "No FCM token for user %s, skipping RIDE_CREDIT_REFUNDED push",
-                user_id,
-            )
-            return
-
-        payload = create_ride_credit_refunded_payload(
-            ride_id=ride_id,
-            credits_refunded=credits_refunded,
-            new_balance=new_balance,
-        )
-        await send_push(
-            db, fcm_token, NotificationType.RIDE_CREDIT_REFUNDED, payload, user_id, language
-        )
-        logger.info("FCM_RIDE_CREDIT_REFUNDED_SENT: user_id=%s, ride_id=%s", user_id, ride_id)
-    except Exception:
-        logger.warning(
-            "FCM RIDE_CREDIT_REFUNDED failed for user %s, ride_id=%s",
-            user_id,
-            ride_id,
-            exc_info=True,
-        )
+    """Send RIDE_CREDIT_REFUNDED push when a ride is verified as CANCELLED."""
+    payload = create_ride_credit_refunded_payload(
+        ride_id=ride_id,
+        credits_refunded=credits_refunded,
+        new_balance=new_balance,
+    )
+    await _send_notification(
+        db,
+        user_id,
+        NotificationType.RIDE_CREDIT_REFUNDED,
+        payload,
+        "RIDE_CREDIT_REFUNDED",
+        ride_id=ride_id,
+    )
 
 
 async def send_credits_depleted(db: AsyncSession, user_id: UUID) -> None:
-    """Send CREDITS_DEPLETED push notification when user balance reaches zero.
-
-    Fire-and-forget: exceptions are caught and logged, never propagated.
-    """
-    try:
-        fcm_token, language = await _get_user_push_info(db, user_id)
-        if not fcm_token:
-            logger.debug("No FCM token for user %s, skipping CREDITS_DEPLETED push", user_id)
-            return
-
-        payload = create_credits_depleted_payload()
-        await send_push(
-            db, fcm_token, NotificationType.CREDITS_DEPLETED, payload, user_id, language
-        )
-        logger.info("FCM_CREDITS_DEPLETED_SENT: user_id=%s", user_id)
-    except Exception:
-        logger.warning("FCM CREDITS_DEPLETED failed for user %s", user_id, exc_info=True)
+    """Send CREDITS_DEPLETED push notification when user balance reaches zero."""
+    payload = create_credits_depleted_payload()
+    await _send_notification(
+        db,
+        user_id,
+        NotificationType.CREDITS_DEPLETED,
+        payload,
+        "CREDITS_DEPLETED",
+    )
 
 
 async def send_credits_low(
@@ -239,26 +248,17 @@ async def send_credits_low(
     balance: int,
     threshold: int,
 ) -> None:
-    """Send CREDITS_LOW push notification when user balance is below threshold.
-
-    Fire-and-forget: exceptions are caught and logged, never propagated.
-    """
-    try:
-        fcm_token, language = await _get_user_push_info(db, user_id)
-        if not fcm_token:
-            logger.debug("No FCM token for user %s, skipping CREDITS_LOW push", user_id)
-            return
-
-        payload = create_credits_low_payload(balance=balance, threshold=threshold)
-        await send_push(db, fcm_token, NotificationType.CREDITS_LOW, payload, user_id, language)
-        logger.info(
-            "FCM_CREDITS_LOW_SENT: user_id=%s, balance=%d, threshold=%d",
-            user_id,
-            balance,
-            threshold,
-        )
-    except Exception:
-        logger.warning("FCM CREDITS_LOW failed for user %s", user_id, exc_info=True)
+    """Send CREDITS_LOW push notification when user balance is below threshold."""
+    payload = create_credits_low_payload(balance=balance, threshold=threshold)
+    await _send_notification(
+        db,
+        user_id,
+        NotificationType.CREDITS_LOW,
+        payload,
+        "CREDITS_LOW",
+        balance=balance,
+        threshold=threshold,
+    )
 
 
 async def send_balance_adjusted(
@@ -267,28 +267,17 @@ async def send_balance_adjusted(
     amount: int,
     new_balance: int,
 ) -> None:
-    """Send BALANCE_ADJUSTED push notification after admin balance adjustment.
-
-    Fire-and-forget: exceptions are caught and logged, never propagated.
-    """
-    try:
-        fcm_token, language = await _get_user_push_info(db, user_id)
-        if not fcm_token:
-            logger.debug("No FCM token for user %s, skipping BALANCE_ADJUSTED push", user_id)
-            return
-
-        payload = create_balance_adjusted_payload(amount=amount, new_balance=new_balance)
-        await send_push(
-            db, fcm_token, NotificationType.BALANCE_ADJUSTED, payload, user_id, language
-        )
-        logger.info(
-            "FCM_BALANCE_ADJUSTED_SENT: user_id=%s, amount=%+d, new_balance=%d",
-            user_id,
-            amount,
-            new_balance,
-        )
-    except Exception:
-        logger.warning("FCM BALANCE_ADJUSTED failed for user %s", user_id, exc_info=True)
+    """Send BALANCE_ADJUSTED push notification after admin balance adjustment."""
+    payload = create_balance_adjusted_payload(amount=amount, new_balance=new_balance)
+    await _send_notification(
+        db,
+        user_id,
+        NotificationType.BALANCE_ADJUSTED,
+        payload,
+        "BALANCE_ADJUSTED",
+        amount=amount,
+        new_balance=new_balance,
+    )
 
 
 async def send_search_update_required(
@@ -296,20 +285,12 @@ async def send_search_update_required(
     user_id: UUID,
     min_version: str,
 ) -> None:
-    """Send SEARCH_UPDATE_REQUIRED push to main app when search app is outdated.
-
-    Fire-and-forget: exceptions are caught and logged, never propagated.
-    """
-    try:
-        fcm_token, language = await _get_user_push_info(db, user_id)
-        if not fcm_token:
-            logger.debug("No FCM token for user %s, skipping SEARCH_UPDATE_REQUIRED push", user_id)
-            return
-
-        payload = create_search_update_required_payload(min_version=min_version)
-        await send_push(
-            db, fcm_token, NotificationType.SEARCH_UPDATE_REQUIRED, payload, user_id, language
-        )
-        logger.info("FCM_SEARCH_UPDATE_REQUIRED_SENT: user_id=%s", user_id)
-    except Exception:
-        logger.warning("FCM SEARCH_UPDATE_REQUIRED failed for user %s", user_id, exc_info=True)
+    """Send SEARCH_UPDATE_REQUIRED push to main app when search app is outdated."""
+    payload = create_search_update_required_payload(min_version=min_version)
+    await _send_notification(
+        db,
+        user_id,
+        NotificationType.SEARCH_UPDATE_REQUIRED,
+        payload,
+        "SEARCH_UPDATE_REQUIRED",
+    )

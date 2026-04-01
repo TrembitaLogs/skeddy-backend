@@ -3,8 +3,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from firebase_admin import exceptions as firebase_exceptions
 from redis.asyncio import Redis
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -124,7 +125,7 @@ async def create_ride_endpoint(
     if charged > 0 and new_balance == 0:
         try:
             await send_credits_depleted(db, device.user_id)
-        except Exception as exc:
+        except (firebase_exceptions.FirebaseError, OperationalError) as exc:
             logger.warning("FCM CREDITS_DEPLETED push failed for user %s: %s", device.user_id, exc)
 
     # 9. Log if ride was not charged due to zero balance (PRD section 5)
@@ -162,7 +163,7 @@ async def create_ride_endpoint(
                 payload,
                 device.user_id,
             )
-    except Exception as exc:
+    except (firebase_exceptions.FirebaseError, OperationalError) as exc:
         logger.warning("FCM push failed for ride %s: %s", ride.id, exc)
 
     return CreateRideResponse(ride_id=ride.id)

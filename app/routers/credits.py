@@ -227,11 +227,12 @@ async def purchase_credits(
         order.status = PurchaseStatus.FAILED.value
         await db.commit()
         raise HTTPException(status_code=400, detail="INVALID_PURCHASE_TOKEN")
-    except Exception:
+    except (OSError, TimeoutError, ValueError) as exc:
         logger.error(
-            "Google Play verify failed: user_id=%s, product_id=%s",
+            "Google Play verify failed: user_id=%s, product_id=%s: %s",
             current_user.id,
             body.product_id,
+            exc,
             exc_info=True,
         )
         order.status = PurchaseStatus.FAILED.value

@@ -3,6 +3,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import delete
+from sqlalchemy.exc import OperationalError
 
 from app.database import AsyncSessionLocal
 from app.models.refresh_token import RefreshToken
@@ -48,7 +49,7 @@ async def cleanup_expired_tokens() -> None:
                     logger.info("Token cleanup: deleted %d expired refresh token(s)", deleted)
                 else:
                     logger.debug("Token cleanup: no expired refresh tokens found")
-        except Exception:
+        except OperationalError:
             logger.exception("Token cleanup error")
 
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
