@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.config import settings
+from tests.conftest import TEST_DATABASE_URL
 
 BACKEND_DIR = str(Path(__file__).resolve().parents[2])
 
@@ -51,13 +51,23 @@ RIDE_BILLING_COLUMNS = {
 }
 
 
+def _async_test_url() -> str:
+    """Return the async test URL for alembic subprocess (env.py uses asyncpg)."""
+    return TEST_DATABASE_URL
+
+
 def _run_alembic(*args: str) -> subprocess.CompletedProcess:
-    """Run an alembic command via subprocess in the backend directory."""
+    """Run an alembic command via subprocess against the test database."""
+    import os
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = _async_test_url()
     result = subprocess.run(
         [sys.executable, "-m", "alembic", *args],
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
+        env=env,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -69,7 +79,7 @@ def _run_alembic(*args: str) -> subprocess.CompletedProcess:
 
 async def _fetch_rows(query: str, params: dict | None = None) -> list:
     """Execute a SELECT query and return all rows."""
-    engine = create_async_engine(settings.DATABASE_URL)
+    engine = create_async_engine(TEST_DATABASE_URL)
     try:
         async with engine.connect() as conn:
             result = await conn.execute(text(query), params or {})
@@ -80,7 +90,7 @@ async def _fetch_rows(query: str, params: dict | None = None) -> list:
 
 async def _execute_ddl(query: str, params: dict | None = None) -> None:
     """Execute a DDL/DML statement that does not return rows."""
-    engine = create_async_engine(settings.DATABASE_URL)
+    engine = create_async_engine(TEST_DATABASE_URL)
     try:
         async with engine.begin() as conn:
             await conn.execute(text(query), params or {})
@@ -90,7 +100,7 @@ async def _execute_ddl(query: str, params: dict | None = None) -> None:
 
 async def _exec_sql_expect_error(query: str, params: dict):
     """Execute SQL expecting IntegrityError; raise AssertionError if it succeeds."""
-    engine = create_async_engine(settings.DATABASE_URL)
+    engine = create_async_engine(TEST_DATABASE_URL)
     try:
         async with engine.begin() as conn:
             await conn.execute(text(query), params)

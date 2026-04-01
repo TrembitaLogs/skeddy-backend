@@ -1,3 +1,5 @@
+import re
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -27,6 +29,28 @@ class PurchaseResponse(BaseModel):
 
     credits_added: int
     new_balance: int
+
+
+class RestoreCreditsRequest(BaseModel):
+    """Request schema for POST /credits/restore."""
+
+    phone_number: str
+    license_number: str = Field(min_length=1)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_e164(cls, v: str) -> str:
+        if not re.match(r"^\+[0-9]{7,15}$", v):
+            raise ValueError("INVALID_PHONE_FORMAT")
+        return v
+
+    @field_validator("license_number")
+    @classmethod
+    def validate_license_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("INVALID_LICENSE_FORMAT")
+        return v
 
 
 class RestoreCreditsResponse(BaseModel):

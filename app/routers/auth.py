@@ -20,6 +20,7 @@ from app.models.user import User
 from app.redis import get_redis
 from app.schemas.auth import (
     AuthResponse,
+    ChangeEmailRequest,
     ChangePasswordRequest,
     DeleteAccountRequest,
     LoginRequest,
@@ -50,7 +51,11 @@ from app.services.auth_service import (
     verify_verify_code,
 )
 from app.services.credit_service import cache_balance, create_balance_with_bonus
-from app.services.email_service import send_password_reset_code, send_verification_code
+from app.services.email_service import (
+    send_email_change_code,
+    send_password_reset_code,
+    send_verification_code,
+)
 from app.services.pairing_service import search_login
 from app.utils.codes import generate_six_digit_code
 
@@ -126,7 +131,7 @@ async def register(
     code = generate_six_digit_code()
     try:
         await store_verify_code(redis, str(user.id), code)
-        await send_verification_code(body.email, code)
+        await send_verification_code(body.email, code, user.language, db, redis)
     except Exception:
         logger.warning("Failed to send verification email for user %s", user.id)
 
@@ -194,7 +199,6 @@ async def get_profile(
         email=current_user.email,
         email_verified=current_user.email_verified,
         phone_number=current_user.phone_number,
-        license_number=current_user.license_number,
         legacy_credits_restored=has_legacy_claim.scalar_one_or_none() is not None,
         created_at=current_user.created_at,
     )
@@ -210,10 +214,6 @@ async def verify_email(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    # Check if already verified
-    if current_user.email_verified:
-        raise HTTPException(status_code=400, detail="ALREADY_VERIFIED")
-
     # Verify Redis availability
     try:
         await redis.ping()  # type: ignore[misc]
@@ -221,17 +221,89 @@ async def verify_email(
         logger.error("Redis unavailable for email verification")
         raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
+    # Read stored data to check for pending email change
+    key = f"verify_code:{current_user.id}"
+    raw = await redis.get(key)
+    pending_email = None
+    if raw:
+        import json
+
+        data = json.loads(raw)
+        pending_email = data.get("new_email")
+
+    # For initial verification (no pending email change), check if already verified
+    if not pending_email and current_user.email_verified:
+        raise HTTPException(status_code=400, detail="ALREADY_VERIFIED")
+
     # Verify code (raises 401 on failure)
     await verify_verify_code(redis, str(current_user.id), body.code)
 
-    # Mark email as verified
-    current_user.email_verified = True
-    await db.commit()
+    if pending_email:
+        # Email change flow — update email, keep verified
+        current_user.email = pending_email
+        current_user.email_verified = True
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
+        logger.info("Email changed for user %s to %s", current_user.id, pending_email)
+    else:
+        # Initial verification flow
+        current_user.email_verified = True
+        await db.commit()
+        logger.info("Email verified for user %s", current_user.id)
 
     # Delete used code from Redis
     await delete_verify_code(redis, str(current_user.id))
 
-    logger.info("Email verified for user %s", current_user.id)
+    return OkResponse()
+
+
+@router.post("/change-email", response_model=OkResponse)
+@limiter.limit("3/hour", key_func=get_user_key)
+async def change_email(
+    request: Request,
+    response: Response,
+    body: ChangeEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Request email change. Sends a verification code to the new email address.
+
+    The email is only updated after the code is confirmed via POST /auth/verify-email.
+    """
+    # Verify password
+    if not verify_password(body.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
+
+    # Check if new email is the same as current
+    if body.new_email == current_user.email:
+        raise HTTPException(status_code=400, detail="EMAIL_UNCHANGED")
+
+    # Check if new email is already taken
+    result = await db.execute(select(User).where(User.email == body.new_email))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
+
+    # Verify Redis availability
+    try:
+        await redis.ping()  # type: ignore[misc]
+    except RedisError:
+        logger.error("Redis unavailable for email change")
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+
+    # Store verification code with pending new_email
+    code = generate_six_digit_code()
+    await store_verify_code(redis, str(current_user.id), code, new_email=body.new_email)
+
+    # Send verification code to the NEW email address
+    try:
+        await send_email_change_code(body.new_email, code, current_user.language, db, redis)
+    except Exception:
+        logger.warning("Failed to send email change verification for user %s", current_user.id)
+
     return OkResponse()
 
 
@@ -260,7 +332,9 @@ async def resend_verification(
 
     # Send verification email (failure must not break the endpoint)
     try:
-        await send_verification_code(current_user.email, code)
+        await send_verification_code(
+            current_user.email, code, current_user.language, db=None, redis=redis
+        )
     except Exception:
         logger.warning("Failed to send verification email for user %s", current_user.id)
 
@@ -339,7 +413,7 @@ async def request_reset(
         await store_reset_code(redis, body.email, code)
 
         try:
-            await send_password_reset_code(body.email, code)
+            await send_password_reset_code(body.email, code, user.language, db, redis)
         except Exception:
             logger.warning("Failed to send reset email for password reset request")
 

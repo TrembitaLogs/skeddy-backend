@@ -17,7 +17,12 @@ from app.models.credit_transaction import TransactionType
 from app.models.purchase_order import PurchaseOrder, PurchaseStatus
 from app.models.user import User
 from app.redis import get_redis
-from app.schemas.credits import PurchaseRequest, PurchaseResponse, RestoreCreditsResponse
+from app.schemas.credits import (
+    PurchaseRequest,
+    PurchaseResponse,
+    RestoreCreditsRequest,
+    RestoreCreditsResponse,
+)
 from app.services.config_service import get_credit_products
 from app.services.credit_service import add_credits, cache_balance, get_balance
 from app.services.google_play_service import (
@@ -303,28 +308,26 @@ async def purchase_credits(
 async def restore_legacy_credits(
     request: Request,
     response: Response,
+    body: RestoreCreditsRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     """Restore legacy credits from the old system.
 
-    Uses the current user's phone_number and license_number
+    Accepts phone_number and license_number in the request body
     to look up and transfer credits from the legacy_credits table.
     """
     result = await try_restore_legacy_credits(
         user_id=current_user.id,
-        phone_number=current_user.phone_number,
-        license_number=current_user.license_number,
+        phone_number=body.phone_number,
+        license_number=body.license_number,
         db=db,
         redis=redis,
     )
 
     if result.status == RestoreStatus.ALREADY_RESTORED:
         raise HTTPException(status_code=409, detail="ALREADY_RESTORED")
-
-    if result.status == RestoreStatus.INCOMPLETE_PROFILE:
-        raise HTTPException(status_code=422, detail="INCOMPLETE_PROFILE")
 
     if result.status == RestoreStatus.RATE_LIMITED:
         response.headers["Retry-After"] = str(result.retry_after_seconds)

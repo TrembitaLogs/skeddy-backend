@@ -188,32 +188,9 @@ class TestUpdateProfileRequest:
             UpdateProfileRequest(phone_number="")
         assert "INVALID_PHONE_FORMAT" in str(exc_info.value)
 
-    def test_valid_license_number(self):
-        schema = UpdateProfileRequest(license_number="DL123456")
-        assert schema.license_number == "DL123456"
-
-    def test_license_none_is_valid(self):
-        schema = UpdateProfileRequest(license_number=None)
-        assert schema.license_number is None
-
-    def test_blank_license_raises_validation_error(self):
-        with pytest.raises(ValidationError) as exc_info:
-            UpdateProfileRequest(license_number="   ")
-        assert "INVALID_LICENSE_FORMAT" in str(exc_info.value)
-
-    def test_license_stripped(self):
-        schema = UpdateProfileRequest(license_number="  ABC123  ")
-        assert schema.license_number == "ABC123"
-
-    def test_both_fields_together(self):
-        schema = UpdateProfileRequest(phone_number="+12025551234", license_number="DL999")
-        assert schema.phone_number == "+12025551234"
-        assert schema.license_number == "DL999"
-
     def test_model_fields_set_tracks_provided_fields(self):
         schema = UpdateProfileRequest(phone_number="+12025551234")
         assert "phone_number" in schema.model_fields_set
-        assert "license_number" not in schema.model_fields_set
 
 
 class TestDeleteAccountRequest:

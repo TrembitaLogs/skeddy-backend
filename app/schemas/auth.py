@@ -50,6 +50,13 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangeEmailRequest(BaseModel):
+    """Change email request schema."""
+
+    new_email: EmailStr
+    password: str
+
+
 class ProfileResponse(BaseModel):
     """User profile response."""
 
@@ -57,7 +64,6 @@ class ProfileResponse(BaseModel):
     email: str
     email_verified: bool
     phone_number: str | None
-    license_number: str | None
     legacy_credits_restored: bool
     created_at: datetime
 

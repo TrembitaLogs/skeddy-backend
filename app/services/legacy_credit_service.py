@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.credit_balance import CreditBalance
 from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.legacy_credit import LegacyCredit
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ CLAIM_ATTEMPTS_WINDOW = 3600  # 1 hour
 class RestoreStatus(StrEnum):
     SUCCESS = "SUCCESS"
     ALREADY_RESTORED = "ALREADY_RESTORED"
-    INCOMPLETE_PROFILE = "INCOMPLETE_PROFILE"
     RATE_LIMITED = "RATE_LIMITED"
     NO_MATCH = "NO_MATCH"
 
@@ -71,8 +71,8 @@ async def _increment_attempts(user_id: UUID, redis: Redis) -> None:
 
 async def try_restore_legacy_credits(
     user_id: UUID,
-    phone_number: str | None,
-    license_number: str | None,
+    phone_number: str,
+    license_number: str,
     db: AsyncSession,
     redis: Redis,
 ) -> RestoreResult:
@@ -80,8 +80,8 @@ async def try_restore_legacy_credits(
 
     Check order:
     1. User already restored legacy credits → ALREADY_RESTORED
-    2. Both phone_number and license_number present → proceed
-    3. Rate limit not exceeded → search legacy_credits
+    2. Rate limit not exceeded → search legacy_credits
+    3. Match found → link legacy_user_id, transfer credits if balance > 0
 
     Returns RestoreResult with status and restored amount.
     """
@@ -97,11 +97,7 @@ async def try_restore_legacy_credits(
     if existing_claim.scalar_one_or_none() is not None:
         return RestoreResult(status=RestoreStatus.ALREADY_RESTORED)
 
-    # 2. Both fields required
-    if not phone_number or not license_number:
-        return RestoreResult(status=RestoreStatus.INCOMPLETE_PROFILE)
-
-    # 3. Rate limit
+    # 2. Rate limit
     if not await _check_rate_limit(user_id, redis):
         logger.info("Legacy restore rate limited for user %s", user_id)
         retry_after = await _get_retry_after(user_id, redis)
@@ -112,7 +108,7 @@ async def try_restore_legacy_credits(
 
     await _increment_attempts(user_id, redis)
 
-    # Look up legacy record
+    # 3. Look up legacy record
     result = await db.execute(
         select(LegacyCredit).where(
             LegacyCredit.phone_number == phone_number,
@@ -122,32 +118,55 @@ async def try_restore_legacy_credits(
     )
     legacy = result.scalar_one_or_none()
 
-    if legacy is None or legacy.balance <= 0:
+    if legacy is None:
         return RestoreResult(status=RestoreStatus.NO_MATCH)
 
-    # Transfer credits
-    amount = legacy.balance
+    # 4. Link legacy user ID to current user
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one()
+    user.legacy_user_id = legacy.old_user_id
 
-    balance_row = await db.execute(
-        select(CreditBalance).where(CreditBalance.user_id == user_id).with_for_update()
-    )
-    credit_balance = balance_row.scalar_one_or_none()
-    if credit_balance is None:
-        logger.error("CreditBalance not found for user %s during legacy restore", user_id)
-        return RestoreResult(status=RestoreStatus.NO_MATCH)
+    # 5. Transfer credits only if balance > 0
+    amount = max(legacy.balance, 0)
 
-    new_balance = credit_balance.balance + amount
-    credit_balance.balance = new_balance
-
-    db.add(
-        CreditTransaction(
-            user_id=user_id,
-            type=TransactionType.LEGACY_IMPORT,
-            amount=amount,
-            balance_after=new_balance,
-            description=f"Legacy credit transfer from old user #{legacy.old_user_id}",
+    if amount > 0:
+        balance_row = await db.execute(
+            select(CreditBalance).where(CreditBalance.user_id == user_id).with_for_update()
         )
-    )
+        credit_balance = balance_row.scalar_one_or_none()
+        if credit_balance is None:
+            logger.error("CreditBalance not found for user %s during legacy restore", user_id)
+            return RestoreResult(status=RestoreStatus.NO_MATCH)
+
+        new_balance = credit_balance.balance + amount
+        credit_balance.balance = new_balance
+
+        db.add(
+            CreditTransaction(
+                user_id=user_id,
+                type=TransactionType.LEGACY_IMPORT,
+                amount=amount,
+                balance_after=new_balance,
+                description=f"Legacy credit transfer from old user #{legacy.old_user_id}",
+            )
+        )
+    else:
+        # Zero or negative balance — still create a transaction to mark as restored
+        balance_row = await db.execute(
+            select(CreditBalance).where(CreditBalance.user_id == user_id)
+        )
+        credit_balance = balance_row.scalar_one_or_none()
+        current_balance = credit_balance.balance if credit_balance else 0
+
+        db.add(
+            CreditTransaction(
+                user_id=user_id,
+                type=TransactionType.LEGACY_IMPORT,
+                amount=0,
+                balance_after=current_balance,
+                description=f"Legacy account linked from old user #{legacy.old_user_id}",
+            )
+        )
 
     legacy.balance = 0
     legacy.claimed_at = datetime.now(UTC)

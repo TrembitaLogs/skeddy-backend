@@ -162,7 +162,6 @@ async def test_get_profile_response_matches_api_contract(app_client):
         "email",
         "email_verified",
         "phone_number",
-        "license_number",
         "legacy_credits_restored",
         "created_at",
     }
@@ -172,6 +171,5 @@ async def test_get_profile_response_matches_api_contract(app_client):
     assert isinstance(body["email"], str)
     assert isinstance(body["email_verified"], bool)
     assert body["phone_number"] is None or isinstance(body["phone_number"], str)
-    assert body["license_number"] is None or isinstance(body["license_number"], str)
     assert isinstance(body["legacy_credits_restored"], bool)
     assert isinstance(body["created_at"], str)
