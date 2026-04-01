@@ -13,10 +13,12 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.admin import setup_admin
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.middleware.csrf import CSRFMiddleware
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.logging import setup_logging
 from app.middleware.rate_limiter import setup_rate_limiter
 from app.middleware.request_id import RequestIdMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.redis import redis_client
 from app.routers.admin_backup import router as admin_backup_router
 from app.routers.admin_config import router as admin_config_router
@@ -103,7 +105,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(
+    CSRFMiddleware, allowed_origins=cors_origins or [f"http://{settings.HOST}:{settings.PORT}"]
+)
 app.add_middleware(SessionMiddleware, secret_key=settings.ADMIN_SECRET_KEY)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 setup_rate_limiter(app)
