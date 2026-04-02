@@ -242,6 +242,7 @@ async def update_device_state(
     - timezone: from request (validated IANA identifier)
     - app_version: from request
     - accessibility_enabled, lyft_running, screen_on: from device_health (if provided)
+    - latitude, longitude, location_updated_at: from location (if provided)
     - last_interval_sent: the interval sent in response (if provided)
     - offline_notified: reset to False (device is online)
 
@@ -263,6 +264,12 @@ async def update_device_state(
             device.lyft_running = request.device_health.lyft_running
         if request.device_health.screen_on is not None:
             device.screen_on = request.device_health.screen_on
+
+    # Update location if provided
+    if request.location is not None:
+        device.latitude = request.location.latitude
+        device.longitude = request.location.longitude
+        device.location_updated_at = datetime.now(UTC)
 
     # Track interval for health monitoring
     if interval_seconds is not None:

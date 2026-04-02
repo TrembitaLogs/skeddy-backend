@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from app.schemas.ping import (
     AcceptFailureItem,
     DeviceHealth,
+    DeviceLocation,
     PingFiltersResponse,
     PingRequest,
     PingResponse,
@@ -528,3 +529,93 @@ class TestPingResponseVerifyRides:
         )
         assert len(resp_active.verify_rides) == 1
         assert len(resp_inactive.verify_rides) == 1
+
+
+class TestDeviceLocation:
+    """DeviceLocation validation."""
+
+    def test_valid_coordinates(self):
+        loc = DeviceLocation(latitude=40.7128, longitude=-74.0060)
+        assert loc.latitude == 40.7128
+        assert loc.longitude == -74.0060
+
+    def test_boundary_values(self):
+        loc = DeviceLocation(latitude=90.0, longitude=180.0)
+        assert loc.latitude == 90.0
+        assert loc.longitude == 180.0
+
+        loc2 = DeviceLocation(latitude=-90.0, longitude=-180.0)
+        assert loc2.latitude == -90.0
+        assert loc2.longitude == -180.0
+
+    def test_zero_coordinates(self):
+        loc = DeviceLocation(latitude=0.0, longitude=0.0)
+        assert loc.latitude == 0.0
+        assert loc.longitude == 0.0
+
+    def test_latitude_too_high_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            DeviceLocation(latitude=90.1, longitude=0.0)
+        assert "latitude" in str(exc_info.value)
+
+    def test_latitude_too_low_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            DeviceLocation(latitude=-90.1, longitude=0.0)
+        assert "latitude" in str(exc_info.value)
+
+    def test_longitude_too_high_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            DeviceLocation(latitude=0.0, longitude=180.1)
+        assert "longitude" in str(exc_info.value)
+
+    def test_longitude_too_low_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            DeviceLocation(latitude=0.0, longitude=-180.1)
+        assert "longitude" in str(exc_info.value)
+
+    def test_missing_latitude_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            DeviceLocation(longitude=0.0)
+        assert "latitude" in str(exc_info.value)
+
+    def test_missing_longitude_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            DeviceLocation(latitude=0.0)
+        assert "longitude" in str(exc_info.value)
+
+
+class TestPingRequestLocation:
+    """PingRequest with location field."""
+
+    def test_backward_compatible_without_location(self):
+        req = PingRequest(timezone="UTC", app_version="1.0.0")
+        assert req.location is None
+
+    def test_with_location(self):
+        req = PingRequest(
+            timezone="America/New_York",
+            app_version="1.2.0",
+            location=DeviceLocation(latitude=40.7128, longitude=-74.0060),
+        )
+        assert req.location.latitude == 40.7128
+        assert req.location.longitude == -74.0060
+
+    def test_location_from_dict(self):
+        req = PingRequest(
+            timezone="UTC",
+            app_version="1.0.0",
+            location={"latitude": 51.5074, "longitude": -0.1278},
+        )
+        assert req.location.latitude == 51.5074
+        assert req.location.longitude == -0.1278
+
+    def test_serialization_round_trip_with_location(self):
+        req = PingRequest(
+            timezone="UTC",
+            app_version="1.0.0",
+            location=DeviceLocation(latitude=35.6762, longitude=139.6503),
+        )
+        data = req.model_dump(mode="json")
+        restored = PingRequest.model_validate(data)
+        assert restored.location.latitude == 35.6762
+        assert restored.location.longitude == 139.6503

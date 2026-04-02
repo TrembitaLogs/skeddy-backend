@@ -36,6 +36,13 @@ class RideStatusReport(BaseModel):
     present: bool
 
 
+class DeviceLocation(BaseModel):
+    """GPS coordinates of the search device."""
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 class PingRequest(BaseModel):
     """Request schema for POST /ping from search device."""
 
@@ -45,6 +52,7 @@ class PingRequest(BaseModel):
     stats: PingStats | None = None
     last_cycle_duration_ms: int | None = None
     ride_statuses: list[RideStatusReport] | None = None
+    location: DeviceLocation | None = None
 
 
 class PingFiltersResponse(BaseModel):

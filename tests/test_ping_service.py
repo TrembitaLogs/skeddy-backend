@@ -16,6 +16,7 @@ from app.models.user import User
 from app.schemas.ping import (
     AcceptFailureItem,
     DeviceHealth,
+    DeviceLocation,
     PingRequest,
     PingStats,
     RideStatusReport,
@@ -808,6 +809,51 @@ async def test_update_device_state_partial_update(db_session):
     assert device.last_interval_sent == 60
     # timezone updated
     assert device.timezone == "Europe/Kyiv"
+
+
+# --- Test 9: location provided → latitude/longitude/location_updated_at saved ---
+
+
+@pytest.mark.asyncio
+async def test_update_device_state_location_saved(db_session):
+    device = await _create_device_in_db(db_session)
+    assert device.latitude is None
+    assert device.longitude is None
+    assert device.location_updated_at is None
+
+    request = PingRequest(
+        timezone="America/New_York",
+        app_version="1.0.0",
+        location=DeviceLocation(latitude=40.7128, longitude=-74.0060),
+    )
+    await update_device_state(db_session, device, request)
+
+    assert device.latitude == 40.7128
+    assert device.longitude == -74.0060
+    assert device.location_updated_at is not None
+
+
+# --- Test 10: location None → existing values unchanged ---
+
+
+@pytest.mark.asyncio
+async def test_update_device_state_location_none_unchanged(db_session):
+    device = await _create_device_in_db(db_session)
+    device.latitude = 51.5074
+    device.longitude = -0.1278
+    device.location_updated_at = datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
+    await db_session.commit()
+    await db_session.refresh(device)
+
+    request = PingRequest(
+        timezone="America/New_York",
+        app_version="1.0.0",
+    )
+    await update_device_state(db_session, device, request)
+
+    assert device.latitude == 51.5074
+    assert device.longitude == -0.1278
+    assert device.location_updated_at == datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC)
 
 
 # === save_accept_failures tests ===
