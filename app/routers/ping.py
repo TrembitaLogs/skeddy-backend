@@ -110,7 +110,7 @@ async def ping(
 
     # Load filters — needed in ALL response paths per API contract.
     filters = await get_user_filters(db, device.user_id)
-    filters_response = PingFiltersResponse(min_price=filters.min_price)
+    filters_response = PingFiltersResponse(min_price=filters.min_price or 20.0)
 
     # 6. Batch-load all AppConfig values needed below (single Redis MGET).
     configs = await batch_get_ping_configs(db, redis)
