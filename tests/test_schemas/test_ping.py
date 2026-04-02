@@ -472,13 +472,13 @@ class TestPingResponseVerifyRides:
     """PingResponse with verify_rides field."""
 
     def test_backward_compatible_without_verify_rides(self):
-        """Response without verify_rides — defaults to None."""
+        """Response without verify_rides — defaults to empty list."""
         resp = PingResponse(
             search=True,
             interval_seconds=30,
             filters=PingFiltersResponse(min_price=20.0),
         )
-        assert resp.verify_rides is None
+        assert resp.verify_rides == []
 
     def test_empty_verify_rides(self):
         resp = PingResponse(

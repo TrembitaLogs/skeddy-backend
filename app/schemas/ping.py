@@ -76,4 +76,4 @@ class PingResponse(BaseModel):
     update_url: str | None = None
     reason: str | None = None
     filters: PingFiltersResponse
-    verify_rides: list[VerifyRideItem] | None = None
+    verify_rides: list[VerifyRideItem] = []
