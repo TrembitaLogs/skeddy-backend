@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/fontawesome.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/select2.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/flatpickr.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/main.css') }}">
+  {% if admin.favicon_url %}
+  <link rel="icon" href="{{ admin.favicon_url }}">
+  {% endif %}
+  <style>
+    /* Dark theme overrides — only active when html[data-bs-theme="dark"] */
+    [data-bs-theme="dark"] {
+      --bs-body-bg: #1a1d21;
+      --bs-body-color: #c8d0d9;
+      --card-bg: #232830;
+      --border-color: #2e353e;
+    }
+    [data-bs-theme="dark"] body { background-color: var(--bs-body-bg) !important; color: var(--bs-body-color) !important; }
+    [data-bs-theme="dark"] .card:not([class*="bg-"]),
+    [data-bs-theme="dark"] .card:not([class*="bg-"]) > .card-body,
+    [data-bs-theme="dark"] .card-header,
+    [data-bs-theme="dark"] .card-footer { background-color: var(--card-bg) !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .card[class*="bg-"] .card-body { background-color: inherit !important; }
+    [data-bs-theme="dark"] .table,
+    [data-bs-theme="dark"] .table th,
+    [data-bs-theme="dark"] .table td { background-color: var(--card-bg) !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .table-hover tbody tr:hover td { background-color: #2a3038 !important; }
+    [data-bs-theme="dark"] .navbar-vertical,
+    [data-bs-theme="dark"] .navbar-vertical .navbar-collapse { background-color: #1e2228 !important; }
+    [data-bs-theme="dark"] .page-header { background-color: transparent !important; }
+    [data-bs-theme="dark"] .form-control,
+    [data-bs-theme="dark"] .form-select,
+    [data-bs-theme="dark"] .input-group-text,
+    [data-bs-theme="dark"] textarea { background-color: #2a3038 !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .form-control:focus,
+    [data-bs-theme="dark"] .form-select:focus { background-color: #2e353e !important; color: #fff !important; }
+    [data-bs-theme="dark"] .btn-secondary,
+    [data-bs-theme="dark"] .btn-outline-secondary { background-color: #2a3038 !important; border-color: var(--border-color) !important; color: var(--bs-body-color) !important; }
+    [data-bs-theme="dark"] .dropdown-menu { background-color: var(--card-bg) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .dropdown-item { color: var(--bs-body-color) !important; }
+    [data-bs-theme="dark"] .dropdown-item:hover { background-color: #2a3038 !important; }
+    [data-bs-theme="dark"] a { color: #4da3ff; }
+    [data-bs-theme="dark"] .text-muted { color: #8a929a !important; }
+    [data-bs-theme="dark"] .modal-content { background-color: var(--card-bg) !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .select2-container--default .select2-selection--single,
+    [data-bs-theme="dark"] .select2-container--default .select2-selection--multiple,
+    [data-bs-theme="dark"] .select2-dropdown { background-color: #2a3038 !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .select2-container--default .select2-results__option { background-color: var(--card-bg) !important; color: var(--bs-body-color) !important; }
+    [data-bs-theme="dark"] .select2-container--default .select2-results__option--highlighted { background-color: #2a3038 !important; }
+    [data-bs-theme="dark"] .page-item .page-link { background-color: #2a3038 !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    [data-bs-theme="dark"] .page-item.active .page-link { background-color: #4da3ff !important; border-color: #4da3ff !important; color: #fff !important; }
+    /* Checkboxes */
+    [data-bs-theme="dark"] .form-check-input { background-color: #2a3038 !important; border-color: #4a5568 !important; }
+    [data-bs-theme="dark"] .form-check-input:checked { background-color: #4da3ff !important; border-color: #4da3ff !important; }
+    /* Buttons — all variants */
+    [data-bs-theme="dark"] .btn-default,
+    [data-bs-theme="dark"] .btn-light,
+    [data-bs-theme="dark"] .btn:not(.btn-primary):not(.btn-danger):not(.btn-success):not(.btn-warning):not(.btn-info):not(.btn-secondary):not(.btn-outline-primary):not(.btn-outline-danger):not(.btn-icon):not(.theme-toggle) { background-color: #2a3038 !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    /* Search input with white bg */
+    [data-bs-theme="dark"] input[type="search"],
+    [data-bs-theme="dark"] input[type="text"],
+    [data-bs-theme="dark"] input[type="number"],
+    [data-bs-theme="dark"] input[type="email"],
+    [data-bs-theme="dark"] input[type="password"] { background-color: #2a3038 !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+    /* Native select (pagination "10 / Page") */
+    [data-bs-theme="dark"] select { background-color: #2a3038 !important; color: var(--bs-body-color) !important; border-color: var(--border-color) !important; }
+
+    /* Theme switcher */
+    .theme-switcher {
+      display: flex; width: 100%; border-radius: 8px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12); margin: 8px 0 4px;
+    }
+    .theme-btn {
+      flex: 1; border: none; padding: 7px 0; cursor: pointer; font-size: 1rem;
+      background: transparent; color: #8a929a; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .theme-btn:hover { color: #c8d0d9; background: rgba(255,255,255,0.06); }
+    .theme-btn.active { background: #2a3038; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+    [data-bs-theme="light"] .theme-btn.active { background: #e2e6ea; color: #1a1d21; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    [data-bs-theme="light"] .theme-switcher { border-color: rgba(0,0,0,0.12); }
+    [data-bs-theme="light"] .theme-btn { color: #6c757d; }
+    [data-bs-theme="light"] .theme-btn:hover { color: #1a1d21; background: rgba(0,0,0,0.04); }
+  </style>
+  <script>
+    (function() {
+      var saved = localStorage.getItem('skeddy-admin-theme') || 'system';
+      var effective = saved;
+      if (saved === 'system') {
+        effective = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-bs-theme', effective);
+    })();
+  </script>
+  {% block head %}
+  {% endblock %}
+  <title>{{ admin.title }}</title>
+</head>
+
+<body>
+  {% block body %}
+  <main>
+    {% block main %}
+    {% endblock %}
+  </main>
+  {% endblock %}
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/jquery.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/tabler.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/popper.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/bootstrap.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/select2.full.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/flatpickr.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/main.js') }}"></script>
+  <script>
+    function setTheme(choice) {
+      localStorage.setItem('skeddy-admin-theme', choice);
+      var effective = choice;
+      if (choice === 'system') {
+        effective = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-bs-theme', effective);
+      updateSwitcher(choice);
+    }
+    function updateSwitcher(active) {
+      document.querySelectorAll('.theme-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-theme') === active);
+      });
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      var saved = localStorage.getItem('skeddy-admin-theme') || 'system';
+      updateSwitcher(saved);
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+        if (localStorage.getItem('skeddy-admin-theme') === 'system') setTheme('system');
+      });
+    });
+  </script>
+  {% block tail %}
+  {% endblock %}
+</body>
+
+</html>

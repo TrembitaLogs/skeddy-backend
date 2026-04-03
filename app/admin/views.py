@@ -1,9 +1,12 @@
 """ModelAdmin views for SQLAdmin panel."""
+# mypy: disable-error-code="dict-item,call-overload"
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, ClassVar
 
+from markupsafe import Markup
 from redis.exceptions import RedisError
 from sqladmin import ModelView
 from starlette.requests import Request
@@ -18,6 +21,24 @@ from app.models.ride import Ride
 from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
 from app.models.user import User
+
+
+def _format_datetime(model: Any, name: str) -> str:
+    """Format datetime columns as 'YYYY-MM-DD HH:MM:SS'."""
+    val = getattr(model, name, None)
+    if isinstance(val, datetime):
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    return str(val) if val is not None else ""
+
+
+def _format_user_email(model: Any, name: str) -> Markup:
+    """Display user email instead of user_id."""
+    user = getattr(model, "user", None)
+    if user and hasattr(user, "email"):
+        return Markup(f"{user.email}")
+    user_id = getattr(model, "user_id", None)
+    return Markup(f"{user_id}") if user_id else Markup("")
+
 
 logger = logging.getLogger(__name__)
 audit_logger = logging.getLogger("audit.admin")
@@ -52,6 +73,7 @@ class AppConfigAdmin(ModelView, model=AppConfig):
 
     column_list: ClassVar = [AppConfig.key, AppConfig.value, AppConfig.updated_at]
     column_sortable_list: ClassVar = [AppConfig.key, AppConfig.updated_at]
+    column_formatters: ClassVar = {AppConfig.updated_at: _format_datetime}
 
     # Use TextAreaField for 'value' so multiline JSON is easy to edit
     form_overrides: ClassVar = {"value": TextAreaField}
@@ -111,13 +133,11 @@ class UserAdmin(ModelView, model=User):
     icon = "fa-solid fa-user"
 
     # Columns to display in list view (sensitive fields excluded)
-    column_list: ClassVar = [User.id, User.email, User.phone_number, User.created_at]
+    column_list: ClassVar = [User.email, User.phone_number, User.created_at]
+    column_formatters: ClassVar = {User.created_at: _format_datetime}
 
-    # Columns searchable in list view
     column_searchable_list: ClassVar = [User.email, User.phone_number]
-
-    # Columns sortable in list view
-    column_sortable_list: ClassVar = [User.id, User.email, User.created_at]
+    column_sortable_list: ClassVar = [User.email, User.created_at]
 
     # Default sort order (newest first)
     column_default_sort: ClassVar = [(User.created_at, True)]
@@ -189,15 +209,20 @@ class PairedDeviceAdmin(ModelView, model=PairedDevice):
     icon = "fa-solid fa-mobile"
 
     column_list: ClassVar = [
-        PairedDevice.id,
-        PairedDevice.user_id,
+        "user",
         PairedDevice.device_id,
         PairedDevice.registered_at,
         PairedDevice.last_ping_at,
         PairedDevice.timezone,
     ]
+    column_formatters: ClassVar = {
+        "user": _format_user_email,
+        PairedDevice.registered_at: _format_datetime,
+        PairedDevice.last_ping_at: _format_datetime,
+    }
+    column_labels: ClassVar = {"user": "User Email"}
 
-    column_searchable_list: ClassVar = [PairedDevice.device_id]
+    column_searchable_list: ClassVar = [PairedDevice.device_id, User.email]
 
     column_sortable_list: ClassVar = [PairedDevice.registered_at, PairedDevice.last_ping_at]
 
@@ -242,13 +267,14 @@ class SearchFiltersAdmin(ModelView, model=SearchFilters):
     icon = "fa-solid fa-filter"
 
     column_list: ClassVar = [
-        SearchFilters.id,
-        SearchFilters.user_id,
+        "user",
         SearchFilters.min_price,
         SearchFilters.start_time,
         SearchFilters.working_time,
         SearchFilters.working_days,
     ]
+    column_formatters: ClassVar = {"user": _format_user_email}
+    column_labels: ClassVar = {"user": "User Email"}
 
     column_sortable_list: ClassVar = [SearchFilters.min_price, SearchFilters.working_time]
 
@@ -261,11 +287,15 @@ class SearchStatusAdmin(ModelView, model=SearchStatus):
     icon = "fa-solid fa-toggle-on"
 
     column_list: ClassVar = [
-        SearchStatus.id,
-        SearchStatus.user_id,
+        "user",
         SearchStatus.is_active,
         SearchStatus.updated_at,
     ]
+    column_formatters: ClassVar = {
+        "user": _format_user_email,
+        SearchStatus.updated_at: _format_datetime,
+    }
+    column_labels: ClassVar = {"user": "User Email"}
 
     column_sortable_list: ClassVar = [SearchStatus.is_active, SearchStatus.updated_at]
 
@@ -278,14 +308,18 @@ class RideAdmin(ModelView, model=Ride):
     icon = "fa-solid fa-car"
 
     column_list: ClassVar = [
-        Ride.id,
-        Ride.user_id,
+        "user",
         Ride.event_type,
         Ride.idempotency_key,
         Ride.created_at,
     ]
+    column_formatters: ClassVar = {
+        "user": _format_user_email,
+        Ride.created_at: _format_datetime,
+    }
+    column_labels: ClassVar = {"user": "User Email"}
 
-    column_searchable_list: ClassVar = [Ride.idempotency_key, Ride.event_type]
+    column_searchable_list: ClassVar = [Ride.idempotency_key, Ride.event_type, User.email]
 
     column_sortable_list: ClassVar = [Ride.created_at, Ride.event_type]
 
@@ -322,14 +356,18 @@ class AcceptFailureAdmin(ModelView, model=AcceptFailure):
     icon = "fa-solid fa-exclamation-triangle"
 
     column_list: ClassVar = [
-        AcceptFailure.id,
-        AcceptFailure.user_id,
+        "user",
         AcceptFailure.reason,
         AcceptFailure.ride_price,
         AcceptFailure.reported_at,
     ]
+    column_formatters: ClassVar = {
+        "user": _format_user_email,
+        AcceptFailure.reported_at: _format_datetime,
+    }
+    column_labels: ClassVar = {"user": "User Email"}
 
-    column_searchable_list: ClassVar = [AcceptFailure.reason]
+    column_searchable_list: ClassVar = [AcceptFailure.reason, User.email]
 
     column_sortable_list: ClassVar = [AcceptFailure.reported_at, AcceptFailure.ride_price]
 
@@ -373,11 +411,16 @@ class RefreshTokenAdmin(ModelView, model=RefreshToken):
     icon = "fa-solid fa-key"
 
     column_list: ClassVar = [
-        RefreshToken.id,
-        RefreshToken.user_id,
+        "user",
         RefreshToken.created_at,
         RefreshToken.expires_at,
     ]
+    column_formatters: ClassVar = {
+        "user": _format_user_email,
+        RefreshToken.created_at: _format_datetime,
+        RefreshToken.expires_at: _format_datetime,
+    }
+    column_labels: ClassVar = {"user": "User Email"}
 
     column_sortable_list: ClassVar = [RefreshToken.created_at, RefreshToken.expires_at]
 
@@ -422,6 +465,11 @@ class LegacyCreditAdmin(ModelView, model=LegacyCredit):
         LegacyCredit.name,
         LegacyCredit.email,
     ]
+
+    column_formatters: ClassVar = {
+        LegacyCredit.claimed_at: _format_datetime,
+        LegacyCredit.imported_at: _format_datetime,
+    }
 
     column_sortable_list: ClassVar = [
         LegacyCredit.balance,

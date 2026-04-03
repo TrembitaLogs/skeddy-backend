@@ -1,4 +1,5 @@
 """Admin view for EmailTemplate model."""
+# mypy: disable-error-code="dict-item,call-overload"
 
 import logging
 from typing import Any, ClassVar
@@ -31,6 +32,11 @@ class EmailTemplateAdmin(ModelView, model=EmailTemplate):
         EmailTemplate.updated_at,
     ]
 
+    column_formatters: ClassVar = {
+        EmailTemplate.updated_at: lambda m, n: (
+            getattr(m, n).strftime("%Y-%m-%d %H:%M:%S") if getattr(m, n, None) else ""
+        ),
+    }
     column_sortable_list: ClassVar = [EmailTemplate.email_type, EmailTemplate.updated_at]
     column_default_sort: ClassVar = [(EmailTemplate.email_type, False)]
 

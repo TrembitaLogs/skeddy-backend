@@ -1,4 +1,5 @@
 """Admin view for PurchaseOrder model (read-only purchase log)."""
+# mypy: disable-error-code="dict-item,call-overload"
 
 from typing import ClassVar
 
@@ -47,7 +48,6 @@ class PurchaseOrderAdmin(ModelView, model=PurchaseOrder):
 
     # List display
     column_list: ClassVar = [
-        PurchaseOrder.id,
         "user",
         PurchaseOrder.product_id,
         PurchaseOrder.credits_amount,
@@ -56,9 +56,12 @@ class PurchaseOrderAdmin(ModelView, model=PurchaseOrder):
         PurchaseOrder.created_at,
     ]
 
-    # Colored badges for status
+    # Colored badges for status, datetime format
     column_formatters: ClassVar = {
-        PurchaseOrder.status: _format_status,  # type: ignore[dict-item]
+        PurchaseOrder.status: _format_status,
+        PurchaseOrder.created_at: lambda m, n: (
+            getattr(m, n).strftime("%Y-%m-%d %H:%M:%S") if getattr(m, n, None) else ""
+        ),
     }
 
     # Filters: status dropdown + date operations
@@ -98,7 +101,7 @@ class PurchaseOrderAdmin(ModelView, model=PurchaseOrder):
 
     # Detail formatters (same colored output)
     column_formatters_detail: ClassVar = {
-        PurchaseOrder.status: _format_status,  # type: ignore[dict-item]
+        PurchaseOrder.status: _format_status,
     }
 
     # Export includes all data fields (raw values, no HTML formatting)

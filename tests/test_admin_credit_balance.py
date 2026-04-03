@@ -32,8 +32,6 @@ class TestCreditBalanceAdminConfiguration:
             else:
                 column_keys.add(col.key)
 
-        assert "id" in column_keys
-        assert "user_id" in column_keys
         assert "user" in column_keys
         assert "balance" in column_keys
         assert "updated_at" in column_keys
