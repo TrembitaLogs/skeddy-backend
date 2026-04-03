@@ -1,4 +1,5 @@
 """Admin view for PushTemplate model."""
+# mypy: disable-error-code="dict-item,call-overload"
 
 import logging
 from typing import Any, ClassVar
@@ -30,6 +31,11 @@ class PushTemplateAdmin(ModelView, model=PushTemplate):
         PushTemplate.updated_at,
     ]
 
+    column_formatters: ClassVar = {
+        PushTemplate.updated_at: lambda m, n: (
+            getattr(m, n).strftime("%Y-%m-%d %H:%M:%S") if getattr(m, n, None) else ""
+        ),
+    }
     column_sortable_list: ClassVar = [PushTemplate.notification_type, PushTemplate.updated_at]
     column_default_sort: ClassVar = [(PushTemplate.notification_type, False)]
 

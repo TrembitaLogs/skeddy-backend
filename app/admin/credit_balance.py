@@ -1,4 +1,5 @@
 """Admin view for CreditBalance model with Adjust Balance action."""
+# mypy: disable-error-code="dict-item,call-overload"
 
 import logging
 from typing import ClassVar
@@ -33,8 +34,6 @@ class CreditBalanceAdmin(ModelView, model=CreditBalance):
     icon = "fa-solid fa-coins"
 
     column_list: ClassVar = [
-        CreditBalance.id,
-        CreditBalance.user_id,
         "user",
         CreditBalance.balance,
         CreditBalance.updated_at,
@@ -48,6 +47,12 @@ class CreditBalanceAdmin(ModelView, model=CreditBalance):
 
     column_labels: ClassVar = {
         "user": "User Email",
+    }
+
+    column_formatters: ClassVar = {
+        CreditBalance.updated_at: lambda m, n: (
+            getattr(m, n).strftime("%Y-%m-%d %H:%M:%S") if getattr(m, n, None) else ""
+        ),
     }
 
     can_create = True

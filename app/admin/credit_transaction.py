@@ -1,4 +1,5 @@
 """Admin view for CreditTransaction model (read-only audit log)."""
+# mypy: disable-error-code="dict-item,call-overload"
 
 from typing import ClassVar
 
@@ -56,7 +57,6 @@ class CreditTransactionAdmin(ModelView, model=CreditTransaction):
 
     # List display
     column_list: ClassVar = [
-        CreditTransaction.id,
         "user",
         CreditTransaction.type,
         CreditTransaction.amount,
@@ -65,10 +65,13 @@ class CreditTransactionAdmin(ModelView, model=CreditTransaction):
         CreditTransaction.created_at,
     ]
 
-    # Colored badges for type, colored +/- for amount
+    # Colored badges for type, colored +/- for amount, datetime format
     column_formatters: ClassVar = {
-        CreditTransaction.type: _format_type,  # type: ignore[dict-item]
-        CreditTransaction.amount: _format_amount,  # type: ignore[dict-item]
+        CreditTransaction.type: _format_type,
+        CreditTransaction.amount: _format_amount,
+        CreditTransaction.created_at: lambda m, n: (
+            getattr(m, n).strftime("%Y-%m-%d %H:%M:%S") if getattr(m, n, None) else ""
+        ),
     }
 
     # Filters: type dropdown + date operations
@@ -107,8 +110,8 @@ class CreditTransactionAdmin(ModelView, model=CreditTransaction):
 
     # Detail formatters (same colored output)
     column_formatters_detail: ClassVar = {
-        CreditTransaction.type: _format_type,  # type: ignore[dict-item]
-        CreditTransaction.amount: _format_amount,  # type: ignore[dict-item]
+        CreditTransaction.type: _format_type,
+        CreditTransaction.amount: _format_amount,
     }
 
     # Export includes all data fields (raw values, no HTML formatting)

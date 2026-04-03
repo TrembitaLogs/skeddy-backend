@@ -23,7 +23,6 @@ class TestPurchaseOrderAdminConfiguration:
             else:
                 column_keys.add(col.key)
 
-        assert "id" in column_keys
         assert "user" in column_keys
         assert "product_id" in column_keys
         assert "credits_amount" in column_keys

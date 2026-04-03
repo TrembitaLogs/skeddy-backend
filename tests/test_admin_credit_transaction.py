@@ -27,7 +27,6 @@ class TestCreditTransactionAdminConfiguration:
             else:
                 column_keys.add(col.key)
 
-        assert "id" in column_keys
         assert "user" in column_keys
         assert "type" in column_keys
         assert "amount" in column_keys

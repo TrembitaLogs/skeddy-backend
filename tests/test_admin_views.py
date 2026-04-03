@@ -58,14 +58,19 @@ class TestPairedDeviceAdmin:
     def test_sensitive_columns_not_in_column_list(self):
         """Test that device_token_hash is not in column_list."""
         sensitive_fields = {"device_token_hash"}
-        column_fields = {field.key for field in PairedDeviceAdmin.column_list}
+        column_fields = {
+            col if isinstance(col, str) else col.key for col in PairedDeviceAdmin.column_list
+        }
 
         assert not sensitive_fields.intersection(column_fields)
 
     def test_sensitive_columns_excluded_from_details(self):
         """Test that device_token_hash is excluded from details view."""
         sensitive_fields = {"device_token_hash"}
-        excluded_fields = {field.key for field in PairedDeviceAdmin.column_details_exclude_list}
+        excluded_fields = {
+            col if isinstance(col, str) else col.key
+            for col in PairedDeviceAdmin.column_details_exclude_list
+        }
 
         assert sensitive_fields.issubset(excluded_fields)
 
@@ -86,7 +91,9 @@ class TestRefreshTokenAdmin:
     def test_sensitive_columns_not_in_column_list(self):
         """Test that token_hash is not in column_list."""
         sensitive_fields = {"token_hash"}
-        column_fields = {field.key for field in RefreshTokenAdmin.column_list}
+        column_fields = {
+            col if isinstance(col, str) else col.key for col in RefreshTokenAdmin.column_list
+        }
 
         assert not sensitive_fields.intersection(column_fields)
 
