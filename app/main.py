@@ -128,7 +128,7 @@ async def health_check():
         logger.warning("Health check: PostgreSQL unavailable", exc_info=True)
 
     try:
-        await redis_client.ping()
+        await redis_client.ping()  # type: ignore[misc]
         redis_ok = True
     except Exception:
         logger.warning("Health check: Redis unavailable", exc_info=True)
