@@ -92,7 +92,7 @@ async def test_create_ride_valid_data_returns_201(app_client, db_session):
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
-        "app.routers.rides.send_push", new_callable=AsyncMock, return_value=True
+        "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
     ) as mock_send_push:
         resp = await app_client.post(
             RIDES_URL,
@@ -133,7 +133,7 @@ async def test_create_ride_idempotent_replay_returns_200(app_client, db_session)
     body = _ride_body(idempotency_key="aaaabbbb-1111-2222-3333-444455556666")
 
     # First request → 201
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp1 = await app_client.post(
             RIDES_URL,
             json=body,
@@ -144,7 +144,7 @@ async def test_create_ride_idempotent_replay_returns_200(app_client, db_session)
 
     # Second request with same idempotency_key → 200
     with patch(
-        "app.routers.rides.send_push", new_callable=AsyncMock, return_value=True
+        "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
     ) as mock_send_push:
         resp2 = await app_client.post(
             RIDES_URL,
@@ -240,7 +240,7 @@ async def test_create_ride_fcm_failure_still_saves_ride(app_client, db_session):
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
-        "app.routers.rides.send_push", new_callable=AsyncMock, return_value=False
+        "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=False
     ) as mock_send_push:
         resp = await app_client.post(
             RIDES_URL,
@@ -275,7 +275,7 @@ async def test_create_ride_no_fcm_token_skips_push(app_client, db_session):
     # NOTE: NOT registering FCM token
 
     with patch(
-        "app.routers.rides.send_push", new_callable=AsyncMock, return_value=True
+        "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
     ) as mock_send_push:
         resp = await app_client.post(
             RIDES_URL,
@@ -317,7 +317,7 @@ async def test_create_ride_data_saved_correctly(app_client, db_session):
         "rider_name": "John",
     }
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json={
@@ -358,7 +358,7 @@ async def test_create_ride_fcm_payload_correct(app_client):
     await _register_fcm(app_client, reg["access_token"], fcm_token="ride8-fcm-tok")
 
     with patch(
-        "app.routers.rides.send_push", new_callable=AsyncMock, return_value=True
+        "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
     ) as mock_send_push:
         resp = await app_client.post(
             RIDES_URL,
@@ -392,7 +392,9 @@ async def _create_rides_for_user(app_client, device_token, device_id, count):
     """Create multiple rides for testing pagination."""
     ride_ids = []
     for _i in range(count):
-        with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
+        ):
             resp = await app_client.post(
                 RIDES_URL,
                 json=_ride_body(idempotency_key=str(uuid4())),
@@ -606,7 +608,7 @@ async def test_create_ride_fcm_exception_still_saves_ride(app_client, db_session
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
-        "app.routers.rides.send_push",
+        "app.services.ride_service.send_push",
         new_callable=AsyncMock,
         side_effect=OperationalError("FCM request timed out", {}, None),
     ):
@@ -641,7 +643,7 @@ async def test_create_ride_fcm_exception_logs_warning_with_ride_id(app_client, c
 
     with (
         patch(
-            "app.routers.rides.send_push",
+            "app.services.ride_service.send_push",
             new_callable=AsyncMock,
             side_effect=OperationalError("connection refused", {}, None),
         ),
@@ -679,7 +681,7 @@ async def test_create_ride_fcm_payload_values_all_strings(app_client):
     await _register_fcm(app_client, reg["access_token"])
 
     with patch(
-        "app.routers.rides.send_push", new_callable=AsyncMock, return_value=True
+        "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
     ) as mock_send_push:
         resp = await app_client.post(
             RIDES_URL,
@@ -1080,13 +1082,13 @@ async def test_create_ride_race_condition_returns_200(app_client, db_session):
             side_effect=mock_get_ride,
         ),
         patch(
-            "app.routers.rides.create_ride",
+            "app.services.ride_service.create_ride",
             new_callable=AsyncMock,
             side_effect=SAIntegrityError("duplicate key", {}, None),
         ),
         patch.object(db_session, "rollback", new_callable=AsyncMock),
         patch(
-            "app.routers.rides.send_push",
+            "app.services.ride_service.send_push",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -1176,7 +1178,7 @@ async def test_create_ride_ride_hash_uppercase_accepted(app_client, db_session):
 
     uppercase_hash = "A" * 64
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(
@@ -1204,7 +1206,7 @@ async def test_create_ride_valid_timezone_accepted(app_client):
     await _register(app_client, email="tz-valid@example.com")
     pairing = await _pair_device(app_client, "tz-valid@example.com", device_id="tz-valid-dev")
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(
@@ -1231,7 +1233,7 @@ async def test_create_ride_invalid_timezone_not_rejected(app_client):
     await _register(app_client, email="tz-invalid@example.com")
     pairing = await _pair_device(app_client, "tz-invalid@example.com", device_id="tz-invalid-dev")
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(
@@ -1303,7 +1305,7 @@ async def test_create_ride_sets_verification_status_pending(app_client, db_sessi
     await _register(app_client, email="vf-pending@example.com")
     pairing = await _pair_device(app_client, "vf-pending@example.com", device_id="vf-pending-dev")
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(idempotency_key=str(uuid4())),
@@ -1335,7 +1337,7 @@ async def test_create_ride_verification_deadline_before_pickup(app_client, db_se
     body["ride_data"]["pickup_time"] = "Tomorrow \u00b7 6:05AM"
     body["timezone"] = "America/New_York"
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=body,
@@ -1366,7 +1368,7 @@ async def test_create_ride_invalid_timezone_logs_fallback_warning(app_client, ca
     pairing = await _pair_device(app_client, "tz-log@example.com", device_id="tz-log-dev")
 
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
         caplog.at_level(logging.WARNING, logger="app.routers.rides"),
     ):
         resp = await app_client.post(
@@ -1407,7 +1409,7 @@ async def test_create_ride_unparseable_pickup_time_sets_deadline(app_client, db_
     before = datetime.now(UTC)
 
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
         caplog.at_level(logging.WARNING, logger="app.routers.rides"),
     ):
         resp = await app_client.post(
@@ -1474,7 +1476,7 @@ async def test_create_ride_charges_credits_happy_path(app_client, db_session):
     )
     user_id = UUID(reg["user_id"])
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(
@@ -1535,7 +1537,7 @@ async def test_create_ride_partial_charge(app_client, db_session):
     # Reduce balance to 1
     await _set_user_balance(db_session, reg["user_id"], 1)
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(
@@ -1593,7 +1595,7 @@ async def test_create_ride_zero_balance_not_charged(app_client, db_session, capl
     await _set_user_balance(db_session, reg["user_id"], 0)
 
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
         caplog.at_level(logging.WARNING, logger="app.routers.rides"),
     ):
         resp = await app_client.post(
@@ -1650,7 +1652,9 @@ async def test_create_ride_tier_matching_all_tiers(app_client, db_session):
     ]
 
     for price, expected_credits in tier_cases:
-        with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True
+        ):
             resp = await app_client.post(
                 RIDES_URL,
                 json=_ride_body(
@@ -1688,7 +1692,7 @@ async def test_create_ride_credit_transaction_atomic(app_client, db_session):
     pairing = await _pair_device(app_client, "atomic@example.com", device_id="atomic-dev")
     user_id = UUID(reg["user_id"])
 
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp = await app_client.post(
             RIDES_URL,
             json=_ride_body(
@@ -1741,7 +1745,7 @@ async def test_create_ride_idempotent_replay_no_double_charge(app_client, db_ses
     body = _ride_body(idempotency_key=idem_key)
 
     # First request → 201
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp1 = await app_client.post(
             RIDES_URL,
             json=body,
@@ -1750,7 +1754,7 @@ async def test_create_ride_idempotent_replay_no_double_charge(app_client, db_ses
     assert resp1.status_code == 201
 
     # Second request with same idempotency_key → 200
-    with patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True):
+    with patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True):
         resp2 = await app_client.post(
             RIDES_URL,
             json=body,
@@ -1792,8 +1796,10 @@ async def test_create_ride_credits_depleted_push_sent(app_client, db_session):
     await _set_user_balance(db_session, reg["user_id"], 2)
 
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
-        patch("app.routers.rides.send_credits_depleted", new_callable=AsyncMock) as mock_depleted,
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
+        patch(
+            "app.services.ride_service.send_credits_depleted", new_callable=AsyncMock
+        ) as mock_depleted,
     ):
         resp = await app_client.post(
             RIDES_URL,
@@ -1821,8 +1827,10 @@ async def test_create_ride_credits_not_depleted_no_push(app_client, db_session):
 
     # Balance stays at default 10, cost = 2 → remaining 8
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
-        patch("app.routers.rides.send_credits_depleted", new_callable=AsyncMock) as mock_depleted,
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
+        patch(
+            "app.services.ride_service.send_credits_depleted", new_callable=AsyncMock
+        ) as mock_depleted,
     ):
         resp = await app_client.post(
             RIDES_URL,
@@ -1850,8 +1858,10 @@ async def test_create_ride_zero_balance_no_depleted_push(app_client, db_session)
     await _set_user_balance(db_session, reg["user_id"], 0)
 
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
-        patch("app.routers.rides.send_credits_depleted", new_callable=AsyncMock) as mock_depleted,
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
+        patch(
+            "app.services.ride_service.send_credits_depleted", new_callable=AsyncMock
+        ) as mock_depleted,
     ):
         resp = await app_client.post(
             RIDES_URL,
@@ -1879,9 +1889,9 @@ async def test_create_ride_credits_depleted_fcm_failure_still_saves(app_client, 
     await _set_user_balance(db_session, reg["user_id"], 2)
 
     with (
-        patch("app.routers.rides.send_push", new_callable=AsyncMock, return_value=True),
+        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
         patch(
-            "app.routers.rides.send_credits_depleted",
+            "app.services.ride_service.send_credits_depleted",
             new_callable=AsyncMock,
             side_effect=OperationalError("FCM down", {}, None),
         ),

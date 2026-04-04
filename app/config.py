@@ -101,7 +101,7 @@ class Settings(BaseSettings):
         if not self.ADMIN_SECRET_KEY:
             _logger.warning("ADMIN_SECRET_KEY is not set — sessions will use an empty key")
         if not self.CORS_ORIGINS:
-            _logger.warning("CORS_ORIGINS is not set — no origins will be allowed")
+            raise ValueError("CORS_ORIGINS must be set in production/staging environments")
         if not self.SENTRY_DSN:
             _logger.warning("SENTRY_DSN is not set — error tracking is disabled")
         return self

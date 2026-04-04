@@ -20,7 +20,7 @@ from app.services.config_service import get_min_search_version
 from app.services.credit_service import get_balance
 from app.services.pairing_service import get_device_by_user_id
 from app.services.ping_service import check_app_version
-from app.services.search_service import get_search_status, set_search_active
+from app.services.search_service import get_search_status_with_device, set_search_active
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -70,8 +70,7 @@ async def get_status(
     redis: Redis = Depends(get_redis),
 ):
     """Return search status with device online information."""
-    status = await get_search_status(db, current_user.id)
-    device = await get_device_by_user_id(db, current_user.id)
+    status, device = await get_search_status_with_device(db, current_user.id)
 
     is_online = False
     last_ping_at = None
