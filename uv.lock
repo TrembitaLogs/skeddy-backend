@@ -495,7 +495,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.128.6"
+version = "0.135.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -504,9 +504,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/d1/195005b5e45b443e305136df47ee7df4493d782e0c039dd0d97065580324/fastapi-0.128.6.tar.gz", hash = "sha256:0cb3946557e792d731b26a42b04912f16367e3c3135ea8290f620e234f2b604f", size = 374757, upload-time = "2026-02-09T17:27:03.541Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f7/e6/7adb4c5fa231e82c35b8f5741a9f2d055f520c29af5546fd70d3e8e1cd2e/fastapi-0.135.3.tar.gz", hash = "sha256:bd6d7caf1a2bdd8d676843cdcd2287729572a1ef524fc4d65c17ae002a1be654", size = 396524, upload-time = "2026-04-01T16:23:58.188Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/58/a2c4f6b240eeb148fb88cdac48f50a194aba760c1ca4988c6031c66a20ee/fastapi-0.128.6-py3-none-any.whl", hash = "sha256:bb1c1ef87d6086a7132d0ab60869d6f1ee67283b20fbf84ec0003bd335099509", size = 103674, upload-time = "2026-02-09T17:27:02.355Z" },
+    { url = "https://files.pythonhosted.org/packages/84/a4/5caa2de7f917a04ada20018eccf60d6cc6145b0199d55ca3711b0fc08312/fastapi-0.135.3-py3-none-any.whl", hash = "sha256:9b0f590c813acd13d0ab43dd8494138eb58e484bfac405db1f3187cfc5810d98", size = 117734, upload-time = "2026-04-01T16:23:59.328Z" },
 ]
 
 [[package]]
@@ -520,7 +520,7 @@ wheels = [
 
 [[package]]
 name = "firebase-admin"
-version = "7.1.0"
+version = "7.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachecontrol" },
@@ -530,9 +530,9 @@ dependencies = [
     { name = "httpx", extra = ["http2"] },
     { name = "pyjwt", extra = ["crypto"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/41/859f78701761bed7abdb8a7c050819c654dad17f96c658dcdf263d5a9641/firebase_admin-7.1.0.tar.gz", hash = "sha256:a163014a4368c43f7efa409948065f8856b51bd2ae5d82c24586e546d5fd4a26", size = 194786, upload-time = "2025-07-31T20:36:39.512Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/27/92ae60e01df51ce2de33d74d67a71e2a3c97e7b6bc0402d0a576fc3d20bc/firebase_admin-7.3.0.tar.gz", hash = "sha256:262b9bcc43c8820834d8eee5fc60d15aaedc76976b1988e1740b9579f34f9577", size = 196473, upload-time = "2026-03-19T19:01:09.683Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/16/eb9bf44cdc7af0317a70ae770ad4170b9fcfbb660ac32806742506be1246/firebase_admin-7.1.0-py3-none-any.whl", hash = "sha256:1913e783b7ad56f891e1aca86e6fdde6a8ec49b7a920dd451da155e8647506c8", size = 137140, upload-time = "2025-07-31T20:36:38.266Z" },
+    { url = "https://files.pythonhosted.org/packages/60/97/4bffee90a160bf35ad81a1c2cd17811dda5c24e51d2aa5463845561df50c/firebase_admin-7.3.0-py3-none-any.whl", hash = "sha256:4538491d20a0edf12e0ad19c18d31e4e6e2f18d149cdf9ba7f8623ff1e4cda97", size = 138233, upload-time = "2026-03-19T19:01:08.098Z" },
 ]
 
 [[package]]
@@ -1656,8 +1656,8 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=4.2.0" },
     { name = "cachetools", specifier = ">=7.0.1" },
     { name = "email-validator", specifier = ">=2.3.0" },
-    { name = "fastapi", specifier = ">=0.128.6" },
-    { name = "firebase-admin", specifier = ">=7.1.0" },
+    { name = "fastapi", specifier = ">=0.135.3" },
+    { name = "firebase-admin", specifier = ">=7.3.0" },
     { name = "google-api-python-client", specifier = ">=2.190.0" },
     { name = "google-auth", specifier = ">=2.48.0" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
@@ -1670,7 +1670,7 @@ requires-dist = [
     { name = "redis", specifier = ">=7.1.1" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.52.0" },
     { name = "slowapi", specifier = ">=0.1.9" },
-    { name = "sqladmin", specifier = ">=0.23.0" },
+    { name = "sqladmin", specifier = ">=0.24.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.46" },
     { name = "tzdata", specifier = ">=2025.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40.0" },
@@ -1705,7 +1705,7 @@ wheels = [
 
 [[package]]
 name = "sqladmin"
-version = "0.23.0"
+version = "0.24.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
@@ -1714,9 +1714,9 @@ dependencies = [
     { name = "starlette" },
     { name = "wtforms" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9d/4e/c05e73c207865f76331ee306e69c468a81eb5e104486d704a377230912ff/sqladmin-0.23.0.tar.gz", hash = "sha256:62339022dbf2f5d7323a6b6b548d2daa9ea2f98fc675b238ac7af088f1d530d2", size = 1437285, upload-time = "2026-02-04T08:15:29.647Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/34/33fec68662aadddae8bbeb815653062298516d3330d68925888a0814ca03/sqladmin-0.24.0.tar.gz", hash = "sha256:186680182855c30d9b912267bd5a5f66493b15ee2f8ca296d16c420faa6cfb96", size = 1437857, upload-time = "2026-03-30T12:55:01.812Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9b/76/640953262e86ce6903db8f7005b8ff681ee232cfc90242cce3ece081ecda/sqladmin-0.23.0-py3-none-any.whl", hash = "sha256:d8f3a837bb7e6759f9c4069102190182b070ba2c63480a5eaa95c9b8f46ad4c5", size = 1450678, upload-time = "2026-02-04T08:15:31.489Z" },
+    { url = "https://files.pythonhosted.org/packages/70/06/7901983e5ce10948cde3e15ea906ab031a7ab35c7521843cca1379eff611/sqladmin-0.24.0-py3-none-any.whl", hash = "sha256:ff9b9ad29723bc23334f6f37953250817e9fc2347d4bdcc3a64920dbeb5e742a", size = 1451273, upload-time = "2026-03-30T12:55:03.034Z" },
 ]
 
 [[package]]
