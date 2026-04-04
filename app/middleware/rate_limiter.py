@@ -16,13 +16,12 @@ Custom key functions:
 - get_user_key: per-user limiting using user_id from JWT payload
 """
 
-import base64
-import json
 import logging
 import time
 from collections.abc import Callable
 from typing import Any
 
+import jwt
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
@@ -129,24 +128,26 @@ def get_device_key(request: Request) -> str:
 
 
 def get_user_key(request: Request) -> str:
-    """Per-user rate limiting key using user_id from JWT payload.
+    """Per-user rate limiting key using user_id from a verified JWT.
 
-    Decodes the JWT payload without signature verification (rate limiting
-    only — authentication is handled by the auth dependency).
-    Falls back to remote address if the token is missing or malformed.
+    Verifies the JWT signature before trusting the payload, preventing
+    attackers from crafting tokens with arbitrary user_ids to manipulate
+    per-user rate limit buckets.
+    Falls back to IP-based limiting if the token is missing, expired, or invalid.
     """
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
         try:
             token = auth[7:]
-            payload_b64 = token.split(".")[1]
-            # Fix base64 padding
-            payload_b64 += "=" * (-len(payload_b64) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET,
+                algorithms=[settings.JWT_ALGORITHM],
+            )
             user_id = payload.get("sub")
             if user_id:
                 return f"user:{user_id}"
-        except (IndexError, ValueError, json.JSONDecodeError):
+        except jwt.InvalidTokenError:
             pass
     return get_remote_address(request)
 

@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -91,16 +92,27 @@ def calculate_dynamic_interval(
     return max(int(interval), MIN_INTERVAL_SECONDS)
 
 
+_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+
+
 def parse_time(time_str: str) -> time:
-    """Parse HH:MM string to time object.
+    """Parse HH:MM string to time object with format and bounds validation.
 
     Args:
         time_str: Time in HH:MM 24-hour format (e.g., '06:30', '22:00').
 
     Returns:
         A time object representing the given time.
+
+    Raises:
+        HTTPException(422): If time_str is not valid HH:MM format or out of range.
     """
-    hour, minute = map(int, time_str.split(":"))
+    match = _TIME_RE.match(time_str)
+    if not match:
+        raise HTTPException(status_code=422, detail="INVALID_TIME_FORMAT")
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        raise HTTPException(status_code=422, detail="INVALID_TIME_FORMAT")
     return time(hour, minute)
 
 
