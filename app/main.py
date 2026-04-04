@@ -101,8 +101,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "X-Device-Id",
+        "X-Device-Token",
+        "X-Language",
+        "X-Request-ID",
+    ],
 )
 app.add_middleware(
     CSRFMiddleware, allowed_origins=cors_origins or [f"http://{settings.HOST}:{settings.PORT}"]

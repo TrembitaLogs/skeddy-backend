@@ -134,6 +134,33 @@ async def test_change_password_allows_login_with_new_password(app_client):
     assert "access_token" in login_response.json()
 
 
+# --- Test Strategy: 6. After password change, old password must NOT work ---
+
+
+async def test_change_password_old_password_rejected(app_client):
+    """After change-password, login with old password must fail."""
+    email = "chpwd-oldrej@example.com"
+    reg = await _register_and_get_tokens(app_client, email=email)
+
+    # Change password
+    response = await app_client.post(
+        CHANGE_PASSWORD_URL,
+        json={
+            "current_password": _TEST_PASSWORD,
+            "new_password": _NEW_PASSWORD,
+        },
+        headers=_auth_header(reg["access_token"]),
+    )
+    assert response.status_code == 200
+
+    # Login with old password — should fail
+    login_response = await app_client.post(
+        LOGIN_URL,
+        json={"email": email, "password": _TEST_PASSWORD},
+    )
+    assert login_response.status_code == 401
+
+
 # --- Additional: no auth → 401 ---
 
 

@@ -365,6 +365,7 @@ async def change_password(
         raise HTTPException(status_code=401, detail="INVALID_CURRENT_PASSWORD")
 
     current_user.password_hash = hash_password(body.new_password)
+    await db.commit()
     await delete_user_refresh_tokens(db, current_user.id)
     return OkResponse()
 
