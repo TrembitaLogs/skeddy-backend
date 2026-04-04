@@ -319,14 +319,10 @@ async def test_get_user_key_rejects_forged_jwt(rate_client):
     import json
 
     header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=")
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"sub": "forged-user-id"}).encode()
-    ).rstrip(b"=")
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": "forged-user-id"}).encode()).rstrip(b"=")
     forged_token = f"{header.decode()}.{payload.decode()}.invalidsignature"
 
-    r = await rate_client.get(
-        "/filters", headers={"Authorization": f"Bearer {forged_token}"}
-    )
+    r = await rate_client.get("/filters", headers={"Authorization": f"Bearer {forged_token}"})
     assert r.status_code == 200
 
 
@@ -340,7 +336,5 @@ async def test_get_user_key_accepts_valid_jwt(rate_client):
     user_id = uuid.uuid4()
     token = create_access_token(user_id)
 
-    r = await rate_client.get(
-        "/filters", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await rate_client.get("/filters", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
