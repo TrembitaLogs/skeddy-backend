@@ -2,7 +2,7 @@ name: skeddy-backend
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: skeddy-db
     environment:
       POSTGRES_USER: skeddy
@@ -25,7 +25,7 @@ services:
         max-file: "3"
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: skeddy-redis
     command: redis-server --appendonly yes
     volumes:
@@ -71,7 +71,7 @@ services:
         max-file: "3"
 
   backup:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: skeddy-backup
     volumes:
       - ./scripts/backup-postgres.sh:/scripts/backup-postgres.sh:ro
