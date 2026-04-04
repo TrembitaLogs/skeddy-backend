@@ -47,3 +47,9 @@ CLAUDE.md
 
 # Firebase credentials
 firebase-credentials.json
+
+# SSL/TLS certificates and private keys
+certbot/conf/live/
+*.pem
+*.key
+*.p12

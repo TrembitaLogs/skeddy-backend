@@ -218,6 +218,45 @@ def test_parse_time_midnight():
     assert parse_time("00:00") == time(0, 0)
 
 
+# --- parse_time: rejects invalid format ---
+
+
+def test_parse_time_rejects_no_colon():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_time("0930")
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_time_rejects_letters():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_time("ab:cd")
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_time_rejects_out_of_range_hour():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_time("25:00")
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_time_rejects_out_of_range_minute():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_time("12:60")
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_time_rejects_empty_string():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_time("")
+    assert exc_info.value.status_code == 422
+
+
+def test_parse_time_rejects_extra_segments():
+    with pytest.raises(HTTPException) as exc_info:
+        parse_time("12:30:00")
+    assert exc_info.value.status_code == 422
+
+
 # === is_within_schedule tests ===
 #
 # Date reference (2024):
