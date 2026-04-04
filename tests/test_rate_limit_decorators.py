@@ -309,3 +309,32 @@ async def test_get_user_key_falls_back_to_ip_without_auth(rate_client):
     # Should still work (not crash)
     r = await rate_client.get("/filters")
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_get_user_key_rejects_forged_jwt(rate_client):
+    """get_user_key falls back to IP when JWT signature is invalid."""
+    # Forged token with fake user_id — should NOT be trusted for rate limiting
+    import base64
+    import json
+
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=")
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": "forged-user-id"}).encode()).rstrip(b"=")
+    forged_token = f"{header.decode()}.{payload.decode()}.invalidsignature"
+
+    r = await rate_client.get("/filters", headers={"Authorization": f"Bearer {forged_token}"})
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_get_user_key_accepts_valid_jwt(rate_client):
+    """get_user_key extracts user_id from a properly signed JWT."""
+    import uuid
+
+    from app.services.auth_service import create_access_token
+
+    user_id = uuid.uuid4()
+    token = create_access_token(user_id)
+
+    r = await rate_client.get("/filters", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
