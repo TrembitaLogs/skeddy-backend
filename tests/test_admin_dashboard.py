@@ -1,6 +1,6 @@
 """Integration tests for Admin Dashboard view and panel access."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import and_, cast, func, select
@@ -279,7 +279,6 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_today_1",
                     credits_amount=10,
                     status=PurchaseStatus.VERIFIED.value,
-                    created_at=datetime.utcnow(),
                 ),
                 PurchaseOrder(
                     user_id=user.id,
@@ -287,7 +286,6 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_today_2",
                     credits_amount=50,
                     status=PurchaseStatus.VERIFIED.value,
-                    created_at=datetime.utcnow(),
                 ),
             ]
         )
@@ -323,7 +321,6 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_pending",
                     credits_amount=10,
                     status=PurchaseStatus.PENDING.value,
-                    created_at=datetime.utcnow(),
                 ),
                 PurchaseOrder(
                     user_id=user.id,
@@ -331,7 +328,6 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_failed",
                     credits_amount=25,
                     status=PurchaseStatus.FAILED.value,
-                    created_at=datetime.utcnow(),
                 ),
                 PurchaseOrder(
                     user_id=user.id,
@@ -339,7 +335,6 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_consumed",
                     credits_amount=50,
                     status=PurchaseStatus.CONSUMED.value,
-                    created_at=datetime.utcnow(),
                 ),
                 PurchaseOrder(
                     user_id=user.id,
@@ -347,7 +342,6 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_verified",
                     credits_amount=100,
                     status=PurchaseStatus.VERIFIED.value,
-                    created_at=datetime.utcnow(),
                 ),
             ]
         )
@@ -403,7 +397,7 @@ class TestDashboardBillingWidgets:
                     purchase_token="token_yesterday",
                     credits_amount=50,
                     status=PurchaseStatus.VERIFIED.value,
-                    created_at=datetime.utcnow() - timedelta(days=1),
+                    created_at=datetime.now(UTC) - timedelta(days=1),
                 ),
             ]
         )
