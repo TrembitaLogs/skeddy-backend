@@ -115,7 +115,13 @@ app.add_middleware(
 app.add_middleware(
     CSRFMiddleware, allowed_origins=cors_origins or [f"http://{settings.HOST}:{settings.PORT}"]
 )
-app.add_middleware(SessionMiddleware, secret_key=settings.ADMIN_SECRET_KEY)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.ADMIN_SECRET_KEY,
+    https_only=settings.ENVIRONMENT != "dev",
+    same_site="lax",
+    max_age=3600,
+)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ContentTypeMiddleware)
 app.add_middleware(RequestIdMiddleware)

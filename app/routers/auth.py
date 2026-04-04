@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.redis import require_redis
 from app.middleware.rate_limiter import get_user_key, limiter
 from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.refresh_token import RefreshToken
@@ -223,15 +224,8 @@ async def verify_email(
     body: VerifyEmailRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
+    redis: Redis = Depends(require_redis),
 ):
-    # Verify Redis availability
-    try:
-        await redis.ping()  # type: ignore[misc]
-    except RedisError:
-        logger.error("Redis unavailable for email verification")
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
-
     # Read stored data to check for pending email change
     key = f"verify_code:{current_user.id}"
     raw = await redis.get(key)
@@ -279,7 +273,7 @@ async def change_email(
     body: ChangeEmailRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
+    redis: Redis = Depends(require_redis),
 ):
     """Request email change. Sends a verification code to the new email address.
 
@@ -297,13 +291,6 @@ async def change_email(
     result = await db.execute(select(User).where(User.email == body.new_email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
-
-    # Verify Redis availability
-    try:
-        await redis.ping()  # type: ignore[misc]
-    except RedisError:
-        logger.error("Redis unavailable for email change")
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
     # Store verification code with pending new_email
     code = generate_six_digit_code()
@@ -324,18 +311,11 @@ async def resend_verification(
     request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
-    redis: Redis = Depends(get_redis),
+    redis: Redis = Depends(require_redis),
 ):
     # Check if already verified
     if current_user.email_verified:
         raise HTTPException(status_code=400, detail="ALREADY_VERIFIED")
-
-    # Verify Redis availability
-    try:
-        await redis.ping()  # type: ignore[misc]
-    except RedisError:
-        logger.error("Redis unavailable for resend verification")
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
     # Generate new verification code (overwrites previous in Redis)
     code = generate_six_digit_code()
@@ -408,15 +388,8 @@ async def request_reset(
     response: Response,
     body: RequestResetRequest,
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
+    redis: Redis = Depends(require_redis),
 ):
-    # Verify Redis availability - reset tokens require Redis storage
-    try:
-        await redis.ping()  # type: ignore[misc]
-    except RedisError:
-        logger.error("Redis unavailable for password reset request")
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
-
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
@@ -442,15 +415,8 @@ async def reset_password(
     response: Response,
     body: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
+    redis: Redis = Depends(require_redis),
 ):
-    # Verify Redis availability - reset codes are stored in Redis
-    try:
-        await redis.ping()  # type: ignore[misc]
-    except RedisError:
-        logger.error("Redis unavailable for password reset")
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
-
     # Verify reset code (raises 401 on failure)
     await verify_reset_code(redis, body.email, body.code)
 
