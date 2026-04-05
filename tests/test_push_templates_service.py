@@ -24,8 +24,8 @@ class TestGetPushTemplates:
                 notification_type=ntype,
                 title_en=langs["en"]["title"],
                 body_en=langs["en"]["body"],
-                title_es=langs["es"]["title"],
-                body_es=langs["es"]["body"],
+                title_es=f"{ntype} ES title",
+                body_es=f"{ntype} ES body",
             )
             db_session.add(row)
         await db_session.flush()
@@ -60,11 +60,11 @@ class TestGetPushTemplates:
         template = result.get_template("RIDE_ACCEPTED", "en")
         assert template.title == "Modified Title"
 
-    async def test_spanish_template(self, db_session, fake_redis, seed_templates):
+    async def test_spanish_template_from_db(self, db_session, fake_redis, seed_templates):
         result = await get_push_templates(db_session, fake_redis)
         template = result.get_template("CREDITS_DEPLETED", "es")
         assert template is not None
-        assert template.title == "Créditos agotados"
+        assert template.title == "CREDITS_DEPLETED ES title"
 
 
 class TestInvalidatePushTemplates:
