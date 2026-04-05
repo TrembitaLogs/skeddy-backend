@@ -11,6 +11,7 @@ from app.schemas.auth import (
     OkResponse,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
 )
 from app.schemas.profile import UpdateProfileRequest
 
@@ -28,9 +29,19 @@ class TestRegisterRequest:
             RegisterRequest(email="user@example.com", password="short")
         assert "password" in str(exc_info.value)
 
-    def test_password_exactly_8_chars(self):
-        schema = RegisterRequest(email="user@example.com", password="12345678")
-        assert schema.password == "12345678"
+    def test_password_exactly_8_chars_with_uppercase(self):
+        schema = RegisterRequest(email="user@example.com", password="Abcdefgh")
+        assert schema.password == "Abcdefgh"
+
+    def test_password_without_uppercase_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(email="user@example.com", password="alllowercase1")
+        assert "PASSWORD_REQUIRES_UPPERCASE" in str(exc_info.value)
+
+    def test_password_all_digits_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(email="user@example.com", password="12345678")
+        assert "PASSWORD_REQUIRES_UPPERCASE" in str(exc_info.value)
 
     def test_invalid_email_raises_validation_error(self):
         with pytest.raises(ValidationError) as exc_info:
@@ -119,9 +130,14 @@ class TestChangePasswordRequest:
             ChangePasswordRequest(current_password="oldPassword1", new_password="short")
         assert "new_password" in str(exc_info.value)
 
-    def test_new_password_exactly_8_chars(self):
-        schema = ChangePasswordRequest(current_password="oldPassword1", new_password="12345678")
-        assert schema.new_password == "12345678"
+    def test_new_password_exactly_8_chars_with_uppercase(self):
+        schema = ChangePasswordRequest(current_password="oldPassword1", new_password="Abcdefgh")
+        assert schema.new_password == "Abcdefgh"
+
+    def test_new_password_without_uppercase_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            ChangePasswordRequest(current_password="oldPassword1", new_password="alllowercase1")
+        assert "PASSWORD_REQUIRES_UPPERCASE" in str(exc_info.value)
 
     def test_missing_fields_raises_validation_error(self):
         with pytest.raises(ValidationError):
@@ -207,6 +223,27 @@ class TestDeleteAccountRequest:
     def test_short_password_allowed(self):
         schema = DeleteAccountRequest(password="x")
         assert schema.password == "x"
+
+
+class TestResetPasswordRequest:
+    """Tests for ResetPasswordRequest password policy."""
+
+    def test_valid_new_password_with_uppercase(self):
+        schema = ResetPasswordRequest(
+            email="user@example.com", code="12345678", new_password="newPasswd"
+        )
+        assert schema.new_password == "newPasswd"
+
+    def test_new_password_without_uppercase_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            ResetPasswordRequest(
+                email="user@example.com", code="12345678", new_password="alllowercase1"
+            )
+        assert "PASSWORD_REQUIRES_UPPERCASE" in str(exc_info.value)
+
+    def test_short_new_password_raises_validation_error(self):
+        with pytest.raises(ValidationError):
+            ResetPasswordRequest(email="user@example.com", code="12345678", new_password="Short")
 
 
 class TestOkResponse:
