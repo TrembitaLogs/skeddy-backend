@@ -1131,3 +1131,263 @@ async def test_google_order_id_race_on_consume_returns_200(
     data = resp.json()
     assert data["credits_added"] == 50
     assert data["new_balance"] == 60  # No new credits — dedup
+
+
+# ===========================================================================
+# Task SKE-27: Google Play edge-case tests (81.9% -> 95%+)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Test 25: TimeoutError during verify_purchase -> 503 SERVICE_UNAVAILABLE
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_verify_timeout_returns_503(authenticated_client, db_session, fake_redis):
+    """TimeoutError from Google Play API during verify -> 503, order FAILED."""
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_svc = _mock_gp_service(verify_error=TimeoutError("Google Play API timed out"))
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "timeout-verify-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+    result = await db_session.execute(
+        select(PurchaseOrder).where(PurchaseOrder.purchase_token == "timeout-verify-token")
+    )
+    order = result.scalar_one()
+    assert order.status == PurchaseStatus.FAILED.value
+
+
+# ---------------------------------------------------------------------------
+# Test 26: ValueError during verify_purchase -> 503 SERVICE_UNAVAILABLE
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_verify_value_error_returns_503(
+    authenticated_client, db_session, fake_redis
+):
+    """ValueError from Google Play API during verify -> 503, order FAILED."""
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_svc = _mock_gp_service(verify_error=ValueError("Malformed API response"))
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "valueerror-verify-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+    result = await db_session.execute(
+        select(PurchaseOrder).where(PurchaseOrder.purchase_token == "valueerror-verify-token")
+    )
+    order = result.scalar_one()
+    assert order.status == PurchaseStatus.FAILED.value
+
+
+# ---------------------------------------------------------------------------
+# Test 27: ConnectionResetError during verify -> 503 (subclass of OSError)
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_verify_connection_reset_returns_503(
+    authenticated_client, db_session, fake_redis
+):
+    """ConnectionResetError (network error) during verify -> 503, order FAILED."""
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_svc = _mock_gp_service(verify_error=ConnectionResetError("Connection reset by peer"))
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "connreset-verify-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+    result = await db_session.execute(
+        select(PurchaseOrder).where(PurchaseOrder.purchase_token == "connreset-verify-token")
+    )
+    order = result.scalar_one()
+    assert order.status == PurchaseStatus.FAILED.value
+
+
+# ---------------------------------------------------------------------------
+# Test 28: HttpError 500 during verify_purchase -> unhandled -> 500
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_verify_http_error_500_returns_500(
+    authenticated_client, db_session, fake_redis
+):
+    """HttpError 500 from Google Play verify is not caught by router -> 500.
+
+    The router only catches (OSError, TimeoutError, ValueError); HttpError
+    is not a subclass of any of those, so it propagates as an unhandled
+    exception resulting in a 500 Internal Server Error.
+    """
+    from unittest.mock import MagicMock as StdMagicMock
+
+    from googleapiclient.errors import HttpError
+
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_resp = StdMagicMock()
+    mock_resp.status = 500
+    http_error = HttpError(resp=mock_resp, content=b"Internal Server Error")
+
+    mock_svc = _mock_gp_service(verify_error=http_error)
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "http500-verify-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Test 29: HttpError 502 during verify_purchase -> 500 (same gap)
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_verify_http_error_502_returns_500(
+    authenticated_client, db_session, fake_redis
+):
+    """HttpError 502 (Bad Gateway) from Google Play verify -> 500."""
+    from unittest.mock import MagicMock as StdMagicMock
+
+    from googleapiclient.errors import HttpError
+
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_resp = StdMagicMock()
+    mock_resp.status = 502
+    http_error = HttpError(resp=mock_resp, content=b"Bad Gateway")
+
+    mock_svc = _mock_gp_service(verify_error=http_error)
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "http502-verify-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Test 30: consume_purchase raises TimeoutError -> 500 (unhandled)
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_consume_timeout_returns_500(authenticated_client, db_session, fake_redis):
+    """TimeoutError during consume_purchase is not caught -> 500.
+
+    The router's try/except only wraps verify_purchase (lines 226-242).
+    consume_purchase (line 285) is outside that block, so TimeoutError
+    propagates as an unhandled exception.
+    """
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_svc = _mock_gp_service()
+    mock_svc.consume_purchase = AsyncMock(
+        side_effect=TimeoutError("Google Play consume timed out")
+    )
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "timeout-consume-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Test 31: consume_purchase raises OSError (network) -> 500 (unhandled)
+# ---------------------------------------------------------------------------
+
+
+async def test_purchase_consume_network_error_returns_500(
+    authenticated_client, db_session, fake_redis
+):
+    """OSError during consume_purchase is not caught -> 500.
+
+    consume_purchase only catches HttpError internally. OSError (network
+    failures like ConnectionResetError) propagates to the router, which
+    has no try/except around the consume call.
+    """
+    auth = authenticated_client
+
+    db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
+    await db_session.flush()
+
+    mock_svc = _mock_gp_service()
+    mock_svc.consume_purchase = AsyncMock(side_effect=ConnectionError("Network unreachable"))
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "network-consume-token",
+            },
+            headers=auth.headers,
+        )
+
+    assert resp.status_code == 500
