@@ -17,7 +17,16 @@ async def test_security_headers_present(app_client):
 
 
 @pytest.mark.asyncio
-async def test_csp_allows_cdn_for_admin(app_client):
-    """CSP allows jsdelivr CDN scripts/styles required by admin Swagger UI."""
+async def test_api_csp_is_strict(app_client):
+    """API routes get a strict CSP with no inline scripts/styles."""
     csp = (await app_client.get(HEALTH_URL)).headers["Content-Security-Policy"]
+    assert "default-src 'none'" in csp
+    assert "'unsafe-inline'" not in csp
+
+
+@pytest.mark.asyncio
+async def test_csp_allows_cdn_for_admin(app_client):
+    """CSP allows jsdelivr CDN scripts/styles required by SQLAdmin panel."""
+    csp = (await app_client.get("/admin/")).headers["Content-Security-Policy"]
     assert "https://cdn.jsdelivr.net" in csp
+    assert "'unsafe-inline'" in csp
