@@ -26,16 +26,6 @@ _FALLBACK_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
                 "\u2014 Skeddy Team"
             ),
         },
-        "es": {
-            "subject": "Verifica tu cuenta de Skeddy",
-            "body": (
-                "\u00a1Bienvenido a Skeddy!\n\nTu c\u00f3digo de verificaci\u00f3n es:\n\n{code}\n\n"
-                "Ingresa este c\u00f3digo en la aplicaci\u00f3n Skeddy para verificar tu direcci\u00f3n de correo.\n"
-                "Este c\u00f3digo expira en 24 horas.\n\n"
-                "Si no creaste una cuenta en Skeddy, puedes ignorar este correo.\n\n"
-                "\u2014 Equipo Skeddy"
-            ),
-        },
     },
     "EMAIL_CHANGE": {
         "en": {
@@ -49,17 +39,6 @@ _FALLBACK_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
                 "\u2014 Skeddy Team"
             ),
         },
-        "es": {
-            "subject": "Confirma tu nuevo correo de Skeddy",
-            "body": (
-                "Solicitaste cambiar el correo de tu cuenta de Skeddy a esta direcci\u00f3n.\n\n"
-                "Tu c\u00f3digo de confirmaci\u00f3n es:\n\n{code}\n\n"
-                "Ingresa este c\u00f3digo en la aplicaci\u00f3n Skeddy para confirmar el cambio.\n"
-                "Este c\u00f3digo expira en 24 horas.\n\n"
-                "Si no solicitaste este cambio, puedes ignorar este correo.\n\n"
-                "\u2014 Equipo Skeddy"
-            ),
-        },
     },
     "PASSWORD_RESET": {
         "en": {
@@ -70,16 +49,6 @@ _FALLBACK_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
                 "This code expires in 15 minutes.\n\n"
                 "If you didn't request a password reset, you can safely ignore this email.\n\n"
                 "\u2014 Skeddy Team"
-            ),
-        },
-        "es": {
-            "subject": "Tu c\u00f3digo de restablecimiento de contrase\u00f1a de Skeddy",
-            "body": (
-                "Tu c\u00f3digo de restablecimiento de contrase\u00f1a es:\n\n{code}\n\n"
-                "Ingresa este c\u00f3digo en la aplicaci\u00f3n Skeddy para restablecer tu contrase\u00f1a.\n"
-                "Este c\u00f3digo expira en 15 minutos.\n\n"
-                "Si no solicitaste un restablecimiento de contrase\u00f1a, puedes ignorar este correo.\n\n"
-                "\u2014 Equipo Skeddy"
             ),
         },
     },
