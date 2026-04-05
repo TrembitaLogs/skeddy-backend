@@ -5,12 +5,24 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
+def _validate_password_uppercase(v: str) -> str:
+    """Require at least one uppercase letter in the password."""
+    if not any(c.isupper() for c in v):
+        raise ValueError("PASSWORD_REQUIRES_UPPERCASE")
+    return v
+
+
 class RegisterRequest(BaseModel):
     """Registration request schema."""
 
     email: EmailStr
     password: str = Field(min_length=8)
     phone_number: str | None = None
+
+    @field_validator("password")
+    @classmethod
+    def password_needs_uppercase(cls, v: str) -> str:
+        return _validate_password_uppercase(v)
 
     @field_validator("phone_number")
     @classmethod
@@ -42,6 +54,11 @@ class ChangePasswordRequest(BaseModel):
 
     current_password: str
     new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_needs_uppercase(cls, v: str) -> str:
+        return _validate_password_uppercase(v)
 
 
 class RefreshRequest(BaseModel):
@@ -80,6 +97,11 @@ class ResetPasswordRequest(BaseModel):
     email: EmailStr
     code: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$")
     new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_needs_uppercase(cls, v: str) -> str:
+        return _validate_password_uppercase(v)
 
 
 class VerifyEmailRequest(BaseModel):
