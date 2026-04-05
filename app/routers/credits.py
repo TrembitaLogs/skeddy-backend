@@ -5,6 +5,7 @@ from functools import lru_cache
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from googleapiclient.errors import HttpError
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -229,7 +230,7 @@ async def purchase_credits(
         order.status = PurchaseStatus.FAILED.value
         await db.commit()
         raise HTTPException(status_code=400, detail="INVALID_PURCHASE_TOKEN")
-    except (OSError, TimeoutError, ValueError) as exc:
+    except (OSError, TimeoutError, ValueError, HttpError) as exc:
         logger.error(
             "Google Play verify failed: user_id=%s, product_id=%s: %s",
             current_user.id,
@@ -282,7 +283,19 @@ async def purchase_credits(
         return await _finalize_purchase(order, current_user.id, db, redis, response)
 
     # 6. Consume purchase (allows repurchase of same SKU)
-    consumed = await gp_service.consume_purchase(body.product_id, body.purchase_token)
+    try:
+        consumed = await gp_service.consume_purchase(body.product_id, body.purchase_token)
+    except (OSError, TimeoutError, HttpError) as exc:
+        logger.error(
+            "Google Play consume failed: user_id=%s, product_id=%s: %s",
+            current_user.id,
+            body.product_id,
+            exc,
+            exc_info=True,
+        )
+        order.status = PurchaseStatus.FAILED.value
+        await db.commit()
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
     if not consumed:
         order.status = PurchaseStatus.FAILED.value
         await db.commit()
