@@ -151,18 +151,21 @@ def parse_pickup_time(pickup_time_str: str, tz: ZoneInfo) -> datetime | None:
             break
 
     if parts is None or len(parts) != 2:
+        logger.debug("Pickup time parse failed: no separator found in %r", pickup_time_str)
         return None
 
     date_str, time_str = parts[0].strip(), parts[1].strip()
 
     time_result = _parse_time_part(time_str)
     if time_result is None:
+        logger.debug("Pickup time parse failed: invalid time part %r", time_str)
         return None
     hour, minute = time_result
 
     now_local = datetime.now(tz)
     target_date = _resolve_date(date_str, now_local)
     if target_date is None:
+        logger.debug("Pickup time parse failed: unrecognized date part %r", date_str)
         return None
 
     try:

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -143,7 +144,7 @@ async def verify_reset_code(redis: Redis, email: str, code: str) -> bool:
 
     code_hash = hashlib.sha256(code.encode()).hexdigest()
 
-    if code_hash != data["code_hash"]:
+    if not secrets.compare_digest(code_hash, data["code_hash"]):
         # Increment attempts, preserve remaining TTL
         data["attempts"] += 1
         ttl = await redis.ttl(key)
@@ -211,7 +212,7 @@ async def verify_verify_code(redis: Redis, user_id: str, code: str) -> bool:
 
     code_hash = hashlib.sha256(code.encode()).hexdigest()
 
-    if code_hash != data["code_hash"]:
+    if not secrets.compare_digest(code_hash, data["code_hash"]):
         # Increment attempts, preserve remaining TTL
         data["attempts"] += 1
         ttl = await redis.ttl(key)

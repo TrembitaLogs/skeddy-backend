@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,6 @@ security = HTTPBearer()
 
 
 async def get_current_user(
-    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -34,13 +33,5 @@ async def get_current_user(
 
     # Inject user_id into logging context for all downstream log messages
     user_id_ctx.set(str(user.id))
-
-    # Update language from X-Language header if changed
-    x_language = request.headers.get("X-Language")
-    if x_language:
-        lang = x_language.split("-")[0].lower()
-        if lang and lang != user.language:
-            user.language = lang
-            await db.commit()
 
     return user

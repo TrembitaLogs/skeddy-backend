@@ -492,7 +492,7 @@ class TestRunVerificationFallback:
         async def mock_process(uid, db, redis):
             process_calls.append(uid)
             if uid == user_a:
-                raise RuntimeError("DB error for user A")
+                raise OperationalError("DB error for user A", {}, None)
             return []
 
         with (
@@ -532,7 +532,7 @@ class TestRunVerificationFallback:
 
         @asynccontextmanager
         async def mock_session():
-            raise RuntimeError("DB connection failed")
+            raise OperationalError("DB connection failed", {}, None)
             yield  # pragma: no cover
 
         async def count_and_stop(_seconds):

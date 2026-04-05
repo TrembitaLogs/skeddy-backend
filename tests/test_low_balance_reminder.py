@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.credit_balance import CreditBalance
 from app.models.user import User
@@ -361,7 +362,7 @@ async def test_run_low_balance_reminder_handles_db_error():
 
     @asynccontextmanager
     async def mock_session_factory():
-        raise RuntimeError("DB connection failed")
+        raise OperationalError("DB connection failed", {}, None)
         yield  # pragma: no cover
 
     with (
@@ -435,7 +436,7 @@ async def test_run_low_balance_reminder_per_user_error_doesnt_stop_others():
             call_order += 1
             process_calls.append(uid)
             if uid == user_a:
-                raise RuntimeError("FCM failed for user A")
+                raise OperationalError("FCM failed for user A", {}, None)
             return True
 
         mock_process.side_effect = process_side_effect

@@ -34,10 +34,9 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# In-memory fallback constants
-_FALLBACK_WINDOW_SECONDS = 60
-_FALLBACK_MAX_REQUESTS = 30
-_FALLBACK_MAX_KEYS = 10_000
+_FALLBACK_WINDOW_SECONDS = settings.RATE_LIMIT_FALLBACK_WINDOW_SECONDS
+_FALLBACK_MAX_REQUESTS = settings.RATE_LIMIT_FALLBACK_MAX_REQUESTS
+_FALLBACK_MAX_KEYS = settings.RATE_LIMIT_FALLBACK_MAX_KEYS
 
 
 class _FallbackRateLimitError(Exception):
