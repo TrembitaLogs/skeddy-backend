@@ -23,16 +23,12 @@ logger = logging.getLogger(__name__)
 _ROUNDS = 12
 
 # --- Password reset code Redis key schema (code-based) ---
-# reset_code:{email} → JSON {"code_hash": "sha256...", "attempts": 0}, TTL: 15 min
+# reset_code:{email} → JSON {"code_hash": "sha256...", "attempts": 0}
 _RESET_CODE_PREFIX = "reset_code:"
-_RESET_CODE_TTL = 900  # 15 minutes
-_RESET_CODE_MAX_ATTEMPTS = 5
 
 # --- Email verification code Redis key schema (code-based) ---
-# verify_code:{user_id} → JSON {"code_hash": "sha256...", "attempts": 0}, TTL: 24 hours
+# verify_code:{user_id} → JSON {"code_hash": "sha256...", "attempts": 0}
 _VERIFY_CODE_PREFIX = "verify_code:"
-_VERIFY_CODE_TTL = 86400  # 24 hours
-_VERIFY_CODE_MAX_ATTEMPTS = 5
 
 
 def hash_password(password: str) -> str:
@@ -143,7 +139,7 @@ async def store_reset_code(redis: Redis, email: str, code: str) -> None:
     code_hash = hashlib.sha256(code.encode()).hexdigest()
     await redis.setex(
         f"{_RESET_CODE_PREFIX}{email}",
-        _RESET_CODE_TTL,
+        settings.RESET_CODE_TTL,
         json.dumps({"code_hash": code_hash, "attempts": 0}),
     )
 
@@ -169,7 +165,7 @@ async def verify_reset_code(redis: Redis, email: str, code: str) -> bool:
     data = json.loads(raw)
 
     # Check attempt limit first
-    if data["attempts"] >= _RESET_CODE_MAX_ATTEMPTS:
+    if data["attempts"] >= settings.RESET_CODE_MAX_ATTEMPTS:
         await redis.delete(key)
         raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
 
@@ -211,7 +207,7 @@ async def store_verify_code(
         data["new_email"] = new_email
     await redis.setex(
         f"{_VERIFY_CODE_PREFIX}{user_id}",
-        _VERIFY_CODE_TTL,
+        settings.VERIFY_CODE_TTL,
         json.dumps(data),
     )
 
@@ -237,7 +233,7 @@ async def verify_verify_code(redis: Redis, user_id: str, code: str) -> bool:
     data = json.loads(raw)
 
     # Check attempt limit first
-    if data["attempts"] >= _VERIFY_CODE_MAX_ATTEMPTS:
+    if data["attempts"] >= settings.VERIFY_CODE_MAX_ATTEMPTS:
         await redis.delete(key)
         raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
 
