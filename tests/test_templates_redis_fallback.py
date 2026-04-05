@@ -78,8 +78,8 @@ async def seed_email_templates(db_session):
 class TestPushTemplatesRedisUnavailableMemoryHit:
     """Redis raises RedisError, memory cache has a value -> return from memory."""
 
-    async def test_returns_from_memory_cache(self, db_session, fake_redis):
-        # Warm memory cache via a successful Redis+DB fetch first
+    async def test_returns_from_memory_cache(self, db_session, fake_redis, seed_push_templates):
+        # Warm memory cache via a successful DB fetch (Redis miss -> DB hit -> caches)
         await get_push_templates(db_session, fake_redis)
         cached_value = _memory_cache.get(CACHE_KEY_PUSH_TEMPLATES)
         assert cached_value is not None
