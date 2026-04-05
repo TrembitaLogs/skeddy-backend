@@ -21,6 +21,9 @@ _ADMIN_CSP = (
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all HTTP responses."""
 
+    # Paths whose responses must never be cached (sensitive data / tokens).
+    _NO_STORE_PREFIXES = ("/api/v1/auth", "/api/v1/credits")
+
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
 
@@ -35,5 +38,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+        if any(request.url.path.startswith(p) for p in self._NO_STORE_PREFIXES):
+            response.headers["Cache-Control"] = "no-store"
 
         return response

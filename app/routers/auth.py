@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -235,8 +236,6 @@ async def verify_email(
     raw = await redis.get(key)
     pending_email = None
     if raw:
-        import json
-
         data = json.loads(raw)
         pending_email = data.get("new_email")
 
