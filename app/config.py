@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     MIN_INTERVAL_SECONDS: int = 5
     SAFETY_MULTIPLIER: int = 2
 
+    # Auth code TTLs and attempt limits
+    RESET_CODE_TTL: int = 900  # 15 minutes
+    RESET_CODE_MAX_ATTEMPTS: int = 5
+    VERIFY_CODE_TTL: int = 86400  # 24 hours
+    VERIFY_CODE_MAX_ATTEMPTS: int = 5
+
     # Rate limiter fallback (in-memory, when Redis is down)
     RATE_LIMIT_FALLBACK_WINDOW_SECONDS: int = 60
     RATE_LIMIT_FALLBACK_MAX_REQUESTS: int = 30
