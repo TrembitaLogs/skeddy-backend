@@ -40,7 +40,6 @@ htmlcov/
 .DS_Store
 
 # Claude Code / TaskMaster
-CLAUDE.md
 .claude/
 .taskmaster/
 .mcp.json
