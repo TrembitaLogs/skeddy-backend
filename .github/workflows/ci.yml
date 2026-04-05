@@ -46,6 +46,21 @@ jobs:
       - name: Mypy
         run: uv run mypy app/
 
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: Audit dependencies for vulnerabilities
+        run: uv run pip-audit
+        continue-on-error: true
+
   test:
     runs-on: ubuntu-latest
     services:
