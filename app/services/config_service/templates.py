@@ -26,19 +26,11 @@ DEFAULT_PUSH_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
             "title": "New Ride",
             "body": "Ride from {pickup_location} to {dropoff_location}, ${price}",
         },
-        "es": {
-            "title": "Nuevo viaje",
-            "body": "Viaje de {pickup_location} a {dropoff_location}, ${price}",
-        },
     },
     "SEARCH_OFFLINE": {
         "en": {
             "title": "Device Offline",
             "body": "Your search device has been offline since {last_ping_at}",
-        },
-        "es": {
-            "title": "Dispositivo fuera de línea",
-            "body": "Su dispositivo de búsqueda está fuera de línea desde {last_ping_at}",
         },
     },
     "CREDITS_DEPLETED": {
@@ -46,19 +38,11 @@ DEFAULT_PUSH_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
             "title": "Credits Depleted",
             "body": "Your credit balance is empty. Top up to continue.",
         },
-        "es": {
-            "title": "Créditos agotados",
-            "body": "Su saldo de créditos está vacío. Recargue para continuar.",
-        },
     },
     "CREDITS_LOW": {
         "en": {
             "title": "Low Credits",
             "body": "Your balance is {balance} credits. Minimum for a ride is {threshold}.",
-        },
-        "es": {
-            "title": "Créditos bajos",
-            "body": "Su saldo es de {balance} créditos. Mínimo para un viaje es {threshold}.",
         },
     },
     "RIDE_CREDIT_REFUNDED": {
@@ -66,29 +50,17 @@ DEFAULT_PUSH_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
             "title": "Credit Refunded",
             "body": "{credits_refunded} credit(s) refunded. New balance: {new_balance}",
         },
-        "es": {
-            "title": "Crédito reembolsado",
-            "body": "{credits_refunded} crédito(s) reembolsado(s). Nuevo saldo: {new_balance}",
-        },
     },
     "BALANCE_ADJUSTED": {
         "en": {
             "title": "Balance Updated",
             "body": "Your balance was adjusted by {amount}. New balance: {new_balance}",
         },
-        "es": {
-            "title": "Saldo actualizado",
-            "body": "Su saldo fue ajustado en {amount}. Nuevo saldo: {new_balance}",
-        },
     },
     "SEARCH_UPDATE_REQUIRED": {
         "en": {
             "title": "Update Required",
             "body": "Your search device needs an update to version {min_version}.",
-        },
-        "es": {
-            "title": "Actualización requerida",
-            "body": "Su dispositivo de búsqueda necesita una actualización a la versión {min_version}.",
         },
     },
 }
