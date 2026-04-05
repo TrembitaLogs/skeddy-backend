@@ -4,8 +4,10 @@
 import logging
 from typing import ClassVar
 
+from redis.exceptions import RedisError
 from sqladmin import ModelView, action, expose
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -159,7 +161,7 @@ class CreditBalanceAdmin(ModelView, model=CreditBalance):
 
                         # Notify user about admin balance adjustment
                         await send_balance_adjusted(session, user_id, amount, new_balance)
-                    except Exception:
+                    except (OperationalError, RedisError, OSError):
                         logger.exception("Failed to adjust balance for user %s", user_id)
                         error = "Failed to adjust balance. Please try again."
 

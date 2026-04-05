@@ -5,6 +5,7 @@ from uuid import UUID
 
 import firebase_admin
 from firebase_admin import credentials, exceptions, messaging
+from redis.exceptions import RedisError
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,7 +112,7 @@ async def send_push(
                 {k: v for k, v in string_data.items()}
             )
             string_data["body"] = template.body.format_map({k: v for k, v in string_data.items()})
-    except Exception:
+    except (RedisError, OperationalError, KeyError, ValueError):
         logger.warning("Failed to resolve push template for %s", notification_type, exc_info=True)
 
     message = messaging.Message(data=string_data, token=fcm_token)
@@ -142,7 +143,7 @@ async def send_push(
             )
             await clear_fcm_token(db, user_id)
             return False
-        except Exception as e:
+        except (exceptions.FirebaseError, OSError) as e:
             if attempt < 2:
                 wait_time = 3**attempt
                 logger.warning(

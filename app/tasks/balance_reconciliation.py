@@ -18,6 +18,7 @@ from uuid import UUID
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -315,7 +316,7 @@ async def run_balance_reconciliation() -> None:
                                 if not matched:
                                     mismatch_count += 1
                                 await reconcile_ride_credits(user_id, db)
-                        except Exception:
+                        except (OperationalError, RedisError):
                             logger.exception(
                                 "Balance reconciliation error for user %s",
                                 user_id,
@@ -334,7 +335,7 @@ async def run_balance_reconciliation() -> None:
             if force_full:
                 await mark_full_run(redis_client)
 
-        except Exception:
+        except (OperationalError, RedisError, OSError):
             logger.exception("Balance reconciliation task error")
 
         await asyncio.sleep(RECONCILIATION_INTERVAL_SECONDS)

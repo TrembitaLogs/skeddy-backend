@@ -15,6 +15,7 @@ from uuid import UUID
 
 from firebase_admin import exceptions as firebase_exceptions
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,12 +125,12 @@ async def run_verification_fallback() -> None:
                     try:
                         async with AsyncSessionLocal() as db:
                             await process_user_verifications(user_id, db, redis_client)
-                    except Exception:
+                    except (OperationalError, RedisError, firebase_exceptions.FirebaseError):
                         logger.exception(
                             "Ride verification fallback error for user %s",
                             user_id,
                         )
-        except Exception:
+        except (OperationalError, RedisError, OSError):
             logger.exception("Ride verification fallback error")
 
         await asyncio.sleep(VERIFICATION_INTERVAL_SECONDS)

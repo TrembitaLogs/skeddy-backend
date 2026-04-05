@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.credit_balance import CreditBalance
@@ -467,7 +468,7 @@ class TestRunPurchaseRecovery:
         async def mock_recover(oid, db, redis):
             recover_calls.append(oid)
             if oid == order_a:
-                raise RuntimeError("DB error for order A")
+                raise OperationalError("DB error for order A", {}, None)
             return True
 
         with (
@@ -561,7 +562,7 @@ class TestRunPurchaseRecovery:
 
         @asynccontextmanager
         async def mock_session():
-            raise RuntimeError("DB connection failed")
+            raise OperationalError("DB connection failed", {}, None)
             yield  # pragma: no cover
 
         async def count_and_stop(_seconds):

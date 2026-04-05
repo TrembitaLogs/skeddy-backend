@@ -65,6 +65,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# NOTE: `request: Request` and `response: Response` parameters appear in every endpoint
+# because slowapi's @limiter.limit() decorator requires `request` for key extraction
+# and `response` for injecting rate-limit headers (X-RateLimit-*, Retry-After).
+
 # Pre-computed bcrypt hash for timing-safe login verification.
 # When user is not found, we still run bcrypt.checkpw against this
 # dummy hash to prevent email enumeration via response time differences.

@@ -37,11 +37,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ping"])
 
-# Interval constants (seconds) per API contract.
-# Active search interval comes from settings; others are fixed.
-INTERVAL_INACTIVE = 60
-INTERVAL_FORCE_UPDATE = 300
-
 
 @router.post("/ping", response_model=PingResponse)
 @limiter.limit("12/minute", key_func=get_device_key)
@@ -118,7 +113,7 @@ async def ping(
     # 6a. Check app version.
     version_ok = check_app_version(body.app_version, configs.min_search_version)
     if not version_ok:
-        device.last_interval_sent = INTERVAL_FORCE_UPDATE
+        device.last_interval_sent = settings.PING_INTERVAL_FORCE_UPDATE
         await db.commit()
 
         # Notify main app once per hour that search app needs update.
@@ -132,7 +127,7 @@ async def ping(
             search=False,
             force_update=True,
             update_url=settings.SEARCH_APP_UPDATE_URL,
-            interval_seconds=INTERVAL_FORCE_UPDATE,
+            interval_seconds=settings.PING_INTERVAL_FORCE_UPDATE,
             filters=filters_response,
         )
 
@@ -151,12 +146,12 @@ async def ping(
     # but BEFORE search state decision — per PRD section 7.
     balance = await get_balance(device.user_id, db, redis)
     if balance <= 0:
-        device.last_interval_sent = INTERVAL_INACTIVE
+        device.last_interval_sent = settings.PING_INTERVAL_INACTIVE
         await db.commit()
         return PingResponse(
             search=False,
             reason="NO_CREDITS",
-            interval_seconds=INTERVAL_INACTIVE,
+            interval_seconds=settings.PING_INTERVAL_INACTIVE,
             filters=filters_response,
             verify_rides=verify_rides,
         )
@@ -167,7 +162,7 @@ async def ping(
 
     # 10. Calculate interval, save to device, return response.
     if not search_active:
-        interval = INTERVAL_INACTIVE
+        interval = settings.PING_INTERVAL_INACTIVE
     else:
         if configs.search_interval_config is not None:
             rpd, rph = configs.search_interval_config
