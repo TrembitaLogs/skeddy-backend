@@ -49,8 +49,8 @@ async def seed_push_templates(db_session):
             notification_type=ntype,
             title_en=langs["en"]["title"],
             body_en=langs["en"]["body"],
-            title_es=langs["es"]["title"],
-            body_es=langs["es"]["body"],
+            title_es=f"{ntype} title es",
+            body_es=f"{ntype} body es",
         )
         db_session.add(row)
     await db_session.flush()
