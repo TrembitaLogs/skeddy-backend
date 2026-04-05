@@ -203,14 +203,17 @@ async def test_purchase_unknown_product_returns_400(authenticated_client, db_ses
     db_session.add(AppConfig(key="credit_products", value=CREDIT_PRODUCTS_JSON))
     await db_session.flush()
 
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "credits_999",
-            "purchase_token": "some-token",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_999",
+                "purchase_token": "some-token",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "UNKNOWN_PRODUCT"
@@ -225,14 +228,17 @@ async def test_purchase_missing_config_returns_400(authenticated_client, db_sess
     """Product not in catalog (including defaults) -> 400 UNKNOWN_PRODUCT."""
     auth = authenticated_client
 
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "nonexistent_product",
-            "purchase_token": "some-token",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "nonexistent_product",
+                "purchase_token": "some-token",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "UNKNOWN_PRODUCT"
@@ -475,14 +481,17 @@ async def test_purchase_empty_product_id_returns_422(authenticated_client):
     """POST /credits/purchase with empty product_id -> 422."""
     auth = authenticated_client
 
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "",
-            "purchase_token": "some-token",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "",
+                "purchase_token": "some-token",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 422
 
@@ -496,14 +505,17 @@ async def test_purchase_empty_purchase_token_returns_422(authenticated_client):
     """POST /credits/purchase with empty purchase_token -> 422."""
     auth = authenticated_client
 
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "credits_10",
-            "purchase_token": "",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_10",
+                "purchase_token": "",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 422
 
@@ -579,14 +591,17 @@ async def test_purchase_verified_idempotent_returns_200(
     await db_session.flush()
 
     # POST with same purchase_token — Google API should NOT be called
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "credits_50",
-            "purchase_token": "already-verified-token",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_50",
+                "purchase_token": "already-verified-token",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 200
     data = resp.json()
@@ -626,14 +641,17 @@ async def test_purchase_consumed_recovery_credits_applied(
     await db_session.flush()
 
     # POST — recovery completes without any Google API calls
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "credits_25",
-            "purchase_token": "consumed-recovery-token",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_25",
+                "purchase_token": "consumed-recovery-token",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 201
     data = resp.json()
@@ -838,14 +856,17 @@ async def test_purchase_consumed_recovery_creates_transaction(
     db_session.add(order)
     await db_session.flush()
 
-    resp = await auth.client.post(
-        PURCHASE_URL,
-        json={
-            "product_id": "credits_50",
-            "purchase_token": "consumed-tx-token",
-        },
-        headers=auth.headers,
-    )
+    mock_svc = _mock_gp_service()
+
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
+        resp = await auth.client.post(
+            PURCHASE_URL,
+            json={
+                "product_id": "credits_50",
+                "purchase_token": "consumed-tx-token",
+            },
+            headers=auth.headers,
+        )
 
     assert resp.status_code == 201
 
@@ -928,7 +949,10 @@ async def test_purchase_token_race_verified_returns_200(
             raise SAIntegrityError("duplicate key", {}, None)
         return await original_commit()
 
+    mock_svc = _mock_gp_service()
+
     with (
+        mock_patch("app.routers.credits._create_google_play_service", return_value=mock_svc),
         mock_patch.object(db_session, "commit", side_effect=mock_commit),
         mock_patch.object(db_session, "rollback", new_callable=AsyncMock),
     ):
