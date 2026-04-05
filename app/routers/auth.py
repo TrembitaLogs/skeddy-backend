@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import aiosmtplib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select
@@ -37,6 +38,7 @@ from app.schemas.auth import (
 )
 from app.schemas.pairing import SearchLoginRequest, SearchLoginResponse
 from app.services.auth_service import (
+    blacklist_access_token,
     create_access_token,
     create_refresh_token,
     delete_reset_code,
@@ -360,8 +362,14 @@ async def logout(
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
 ):
     await delete_user_refresh_tokens(db, current_user.id)
+    try:
+        await blacklist_access_token(redis, credentials.credentials)
+    except RedisError:
+        logger.warning("Redis unavailable during logout token blacklist — skipping")
     return OkResponse()
 
 
