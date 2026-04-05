@@ -9,6 +9,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, RootModel, model_validator
 
 SUPPORTED_LANGUAGES = {"en", "es"}
+REQUIRED_LANGUAGES = {"en"}
 
 # Notification types that must have templates defined
 REQUIRED_NOTIFICATION_TYPES = {
@@ -40,7 +41,7 @@ class PushNotificationTemplatesConfig(RootModel[dict[str, dict[str, PushTemplate
 
     Guarantees:
     - All required notification types are present
-    - Each type has templates for all supported languages (en, es)
+    - Each type has at least English templates
     """
 
     @model_validator(mode="after")
@@ -52,9 +53,11 @@ class PushNotificationTemplatesConfig(RootModel[dict[str, dict[str, PushTemplate
             raise ValueError(f"Missing notification types: {sorted(missing_types)}")
 
         for ntype, langs in templates.items():
-            missing_langs = SUPPORTED_LANGUAGES - set(langs.keys())
+            missing_langs = REQUIRED_LANGUAGES - set(langs.keys())
             if missing_langs:
-                raise ValueError(f"Type '{ntype}' missing languages: {sorted(missing_langs)}")
+                raise ValueError(
+                    f"Type '{ntype}' missing required languages: {sorted(missing_langs)}"
+                )
 
         return self
 

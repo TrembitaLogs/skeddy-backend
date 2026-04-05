@@ -48,10 +48,15 @@ class TestPushNotificationTemplatesConfig:
         with pytest.raises(ValueError, match="Missing notification types"):
             PushNotificationTemplatesConfig.model_validate(valid_templates)
 
-    def test_missing_language_rejected(self, valid_templates):
-        del valid_templates["CREDITS_DEPLETED"]["es"]
-        with pytest.raises(ValueError, match="missing languages"):
+    def test_missing_required_language_rejected(self, valid_templates):
+        del valid_templates["CREDITS_DEPLETED"]["en"]
+        with pytest.raises(ValueError, match="missing required languages"):
             PushNotificationTemplatesConfig.model_validate(valid_templates)
+
+    def test_optional_language_removal_allowed(self, valid_templates):
+        del valid_templates["CREDITS_DEPLETED"]["es"]
+        config = PushNotificationTemplatesConfig.model_validate(valid_templates)
+        assert "CREDITS_DEPLETED" in config.root
 
     def test_extra_notification_type_allowed(self, valid_templates):
         valid_templates["CUSTOM_TYPE"] = {
