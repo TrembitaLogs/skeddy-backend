@@ -15,7 +15,7 @@ async def get_search_status(db: AsyncSession, user_id: UUID) -> SearchStatus:
         return status
     # Fallback: return transient object with defaults (not persisted).
     # This covers the unlikely case where the registration-created row is missing.
-    return SearchStatus(user_id=user_id)
+    return SearchStatus(user_id=user_id, is_active=False)
 
 
 async def get_search_status_with_device(
@@ -38,7 +38,7 @@ async def get_search_status_with_device(
         device_result = await db.execute(
             select(PairedDevice).where(PairedDevice.user_id == user_id)
         )
-        return SearchStatus(user_id=user_id), device_result.scalar_one_or_none()
+        return SearchStatus(user_id=user_id, is_active=False), device_result.scalar_one_or_none()
 
     return row[0], row[1]
 
