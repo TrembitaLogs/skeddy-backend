@@ -12,8 +12,8 @@ import json
 import pytest
 from fastapi import HTTPException
 
+from app.config import settings
 from app.services.auth_service import (
-    _RESET_CODE_TTL,
     delete_reset_code,
     store_reset_code,
     verify_reset_code,
@@ -46,7 +46,7 @@ async def test_store_reset_code_uses_correct_ttl(fake_redis):
     setex_calls = fake_redis.setex.call_args_list
     code_setex = [c for c in setex_calls if "reset_code:ttl@example.com" in str(c)]
     assert len(code_setex) == 1
-    assert code_setex[0][0][1] == _RESET_CODE_TTL
+    assert code_setex[0][0][1] == settings.RESET_CODE_TTL
 
 
 async def test_store_reset_code_overwrites_previous(fake_redis):
