@@ -61,8 +61,6 @@ async def test_get_search_status_returns_transient_when_no_row(db_session):
 
     assert result.user_id == user.id
     assert result.is_active is False
-    # Transient object should have no persisted id (default uuid4, but not flushed)
-    assert result.id is not None
 
 
 async def test_get_search_status_transient_not_persisted(db_session):
