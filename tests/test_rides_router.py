@@ -539,7 +539,9 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
     reg = await _register(app_client, email="since@example.com")
     user_id = UUID(reg["user_id"])
 
-    base_time = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
+    # Use relative dates to avoid 8-week cutoff drift
+    now = datetime.now(UTC)
+    base_time = now - timedelta(days=14)
     for i in range(3):
         ride = Ride(
             user_id=user_id,
@@ -552,15 +554,15 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
                 "dropoff_location": f"End {i}",
             },
             ride_hash="a" * 64,
-            created_at=base_time + timedelta(days=i * 7),
+            created_at=base_time + timedelta(days=i * 5),
         )
         db_session.add(ride)
     await db_session.flush()
 
-    # Filter: only events from 5 days after base (should exclude first ride)
-    # Rides: Feb 1 (excluded), Feb 8, Feb 15
-    # REGISTRATION_BONUS: created at now (Feb 25) - after since, included
-    since = (base_time + timedelta(days=5)).isoformat()
+    # Filter: only events from 3 days after base (should exclude first ride)
+    # Rides: base (excluded), base+5d, base+10d
+    # REGISTRATION_BONUS: created at now - after since, included
+    since = (base_time + timedelta(days=3)).isoformat()
     resp = await app_client.get(
         RIDES_EVENTS_URL,
         params={"since": since},
