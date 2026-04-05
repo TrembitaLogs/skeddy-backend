@@ -48,6 +48,7 @@ def create_access_token(user_id: UUID) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
+        "jti": str(uuid.uuid4()),
         "exp": now + timedelta(hours=settings.JWT_ACCESS_TOKEN_EXPIRE_HOURS),
         "iat": now,
     }
@@ -61,6 +62,36 @@ def decode_access_token(token: str) -> dict | None:
         return None
     except jwt.InvalidTokenError:
         return None
+
+
+# --- Access token blacklist Redis key schema ---
+# blacklist:{jti} → "1", TTL = remaining token lifetime
+_BLACKLIST_PREFIX = "blacklist:"
+
+
+async def blacklist_access_token(redis: Redis, token: str) -> None:
+    """Add an access token's JTI to the Redis blacklist.
+
+    The key expires when the token would have expired naturally,
+    so no manual cleanup is needed.
+    """
+    payload = decode_access_token(token)
+    if not payload:
+        return
+    jti = payload.get("jti")
+    if not jti:
+        return
+    exp = payload.get("exp", 0)
+    remaining = int(exp - datetime.now(UTC).timestamp())
+    if remaining <= 0:
+        return
+    await redis.setex(f"{_BLACKLIST_PREFIX}{jti}", remaining, "1")
+
+
+async def is_token_blacklisted(redis: Redis, jti: str) -> bool:
+    """Check whether a JTI is present in the blacklist."""
+    result: int = await redis.exists(f"{_BLACKLIST_PREFIX}{jti}")
+    return result > 0
 
 
 def create_refresh_token() -> str:
