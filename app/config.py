@@ -64,6 +64,21 @@ class Settings(BaseSettings):
     MIN_SEARCH_APP_VERSION: str = "1.0.0"
     SEARCH_APP_UPDATE_URL: str = "https://skeddy-search-releases.sfo3.cdn.digitaloceanspaces.com/search/skeddy-search-latest.apk"
 
+    # Ping intervals (seconds)
+    PING_INTERVAL_INACTIVE: int = 60
+    PING_INTERVAL_FORCE_UPDATE: int = 300
+
+    # Ping service constants
+    BATCH_DEDUP_TTL: int = 3600
+    DEFAULT_CYCLE_DURATION_MS: int = 15000
+    MIN_INTERVAL_SECONDS: int = 5
+    SAFETY_MULTIPLIER: int = 2
+
+    # Rate limiter fallback (in-memory, when Redis is down)
+    RATE_LIMIT_FALLBACK_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_FALLBACK_MAX_REQUESTS: int = 30
+    RATE_LIMIT_FALLBACK_MAX_KEYS: int = 10_000
+
     # Health Monitor
     HEALTH_CHECK_INTERVAL_MINUTES: int = 5
     OFFLINE_NOTIFICATION_THRESHOLD_MINUTES: int = 30

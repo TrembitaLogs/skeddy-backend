@@ -25,6 +25,19 @@ def _reset_firebase_apps():
         mock_fa._apps = {}
 
 
+@pytest.fixture(autouse=True)
+def _mock_push_templates():
+    """Mock get_push_templates so send_push does not hit Redis/DB."""
+    mock_templates = MagicMock()
+    mock_templates.get_template.return_value = None
+    with patch(
+        "app.services.fcm_service.get_push_templates",
+        new_callable=AsyncMock,
+        return_value=mock_templates,
+    ):
+        yield
+
+
 class TestInitializeFirebaseWithFilePath:
     """Test initialization via FIREBASE_CREDENTIALS_PATH."""
 

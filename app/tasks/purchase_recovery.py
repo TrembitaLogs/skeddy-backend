@@ -15,6 +15,7 @@ from uuid import UUID
 
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -163,7 +164,7 @@ async def run_purchase_recovery() -> None:
                     try:
                         async with AsyncSessionLocal() as db:
                             await recover_order(order_id, db, redis_client)
-                    except Exception:
+                    except (OperationalError, OSError, ValueError):
                         logger.exception("Purchase recovery error for order %s", order_id)
 
             # Phase 2: Log stuck orders (> 24 hours old)
@@ -179,7 +180,7 @@ async def run_purchase_recovery() -> None:
                     [str(sid) for sid in stuck_ids],
                 )
 
-        except Exception:
+        except (OperationalError, OSError):
             logger.exception("Purchase recovery task error")
 
         await asyncio.sleep(RECOVERY_INTERVAL_SECONDS)

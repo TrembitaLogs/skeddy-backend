@@ -13,6 +13,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.accept_failure import AcceptFailure as AcceptFailureModel
 from app.models.paired_device import PairedDevice
 from app.models.ride import Ride
@@ -22,11 +23,11 @@ from app.services.credit_service import refund_credits_in_txn
 
 logger = logging.getLogger(__name__)
 
-BATCH_DEDUP_TTL = 3600  # 1 hour TTL for batch deduplication
+BATCH_DEDUP_TTL = settings.BATCH_DEDUP_TTL
 BATCH_KEY_PREFIX = "stats_batch:"
-DEFAULT_CYCLE_DURATION_MS = 15000  # Default search cycle duration when not reported
-MIN_INTERVAL_SECONDS = 5  # Minimum interval between search cycles
-SAFETY_MULTIPLIER = 2  # Safety margin for interval=0 deadline proximity check
+DEFAULT_CYCLE_DURATION_MS = settings.DEFAULT_CYCLE_DURATION_MS
+MIN_INTERVAL_SECONDS = settings.MIN_INTERVAL_SECONDS
+SAFETY_MULTIPLIER = settings.SAFETY_MULTIPLIER
 
 
 def validate_timezone(timezone_str: str) -> ZoneInfo:

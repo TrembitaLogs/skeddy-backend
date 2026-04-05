@@ -1,6 +1,7 @@
 """Credit purchase endpoint for Google Play in-app purchases."""
 
 import logging
+from functools import lru_cache
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -35,15 +36,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/credits", tags=["credits"])
 
-_google_play_service: GooglePlayService | None = None
+
+@lru_cache(maxsize=1)
+def _create_google_play_service() -> GooglePlayService:
+    """Create and cache a singleton GooglePlayService instance."""
+    return GooglePlayService()
 
 
-def _get_google_play_service() -> GooglePlayService:
-    """Return lazy singleton GooglePlayService instance."""
-    global _google_play_service
-    if _google_play_service is None:
-        _google_play_service = GooglePlayService()
-    return _google_play_service
+def get_google_play_service() -> GooglePlayService:
+    """FastAPI dependency that provides GooglePlayService via DI."""
+    return _create_google_play_service()
 
 
 async def _handle_order_id_conflict(
@@ -145,6 +147,7 @@ async def purchase_credits(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
+    gp_service: GooglePlayService = Depends(get_google_play_service),
 ):
     """Verify a Google Play purchase and credit the user's balance.
 
@@ -220,7 +223,6 @@ async def purchase_credits(
             # PENDING or FAILED — reuse existing order for verification
 
     # 3. Verify with Google Play Developer API
-    gp_service = _get_google_play_service()
     try:
         gp_result = await gp_service.verify_purchase(body.product_id, body.purchase_token)
     except GooglePlayVerificationError:

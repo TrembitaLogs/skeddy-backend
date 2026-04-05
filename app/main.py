@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
@@ -16,6 +16,7 @@ from app.database import AsyncSessionLocal
 from app.middleware.content_type import ContentTypeMiddleware
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.error_handler import register_exception_handlers
+from app.middleware.language_sync import sync_language_dependency
 from app.middleware.logging import setup_logging
 from app.middleware.rate_limiter import setup_rate_limiter
 from app.middleware.request_id import RequestIdMiddleware
@@ -156,7 +157,7 @@ async def health_check():
     }
 
 
-v1_router = APIRouter()
+v1_router = APIRouter(dependencies=[Depends(sync_language_dependency)])
 v1_router.include_router(auth_router)
 v1_router.include_router(profile_router)
 v1_router.include_router(credits_router)

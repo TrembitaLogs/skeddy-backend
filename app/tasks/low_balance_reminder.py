@@ -13,9 +13,11 @@ import asyncio
 import logging
 from uuid import UUID
 
+from firebase_admin import exceptions as firebase_exceptions
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -141,7 +143,12 @@ async def run_low_balance_reminder() -> None:
                                 )
                             if sent:
                                 sent_count += 1
-                        except Exception:
+                        except (
+                            OperationalError,
+                            RedisError,
+                            firebase_exceptions.FirebaseError,
+                            OSError,
+                        ):
                             logger.exception(
                                 "Low balance reminder error for user %s",
                                 user_id,
@@ -156,7 +163,7 @@ async def run_low_balance_reminder() -> None:
                     sent_count,
                 )
 
-        except Exception:
+        except (OperationalError, RedisError, OSError):
             logger.exception("Low balance reminder task error")
 
         await asyncio.sleep(REMINDER_INTERVAL_SECONDS)

@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.credit_balance import CreditBalance
 from app.models.credit_transaction import CreditTransaction, TransactionType
@@ -841,7 +842,7 @@ async def test_main_loop_survives_db_error():
 
     @asynccontextmanager
     async def mock_session():
-        raise RuntimeError("DB connection failed")
+        raise OperationalError("DB connection failed", {}, None)
         yield  # pragma: no cover
 
     with (
@@ -929,7 +930,7 @@ async def test_main_loop_per_user_error_doesnt_stop_others():
         async def reconcile_side_effect(uid, force_full, db, redis):
             reconciled_users.append(uid)
             if uid == user_a:
-                raise RuntimeError("DB error for user A")
+                raise OperationalError("DB error for user A", {}, None)
             return True
 
         mock_reconcile.side_effect = reconcile_side_effect

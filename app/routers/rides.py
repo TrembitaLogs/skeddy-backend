@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,10 +139,9 @@ async def get_ride_events(
         try:
             decoded_cursor = decode_cursor(cursor)
         except ValueError:
-            return Response(
-                content='{"error":{"code":"INVALID_CURSOR","message":"Invalid cursor format"}}',
+            raise HTTPException(
                 status_code=400,
-                media_type="application/json",
+                detail={"code": "INVALID_CURSOR", "message": "Invalid cursor format"},
             )
 
     # Parse since
@@ -151,10 +150,12 @@ async def get_ride_events(
         try:
             since_dt = datetime.fromisoformat(since)
         except ValueError:
-            return Response(
-                content='{"error":{"code":"INVALID_SINCE","message":"Invalid since format, expected ISO 8601 datetime"}}',
+            raise HTTPException(
                 status_code=400,
-                media_type="application/json",
+                detail={
+                    "code": "INVALID_SINCE",
+                    "message": "Invalid since format, expected ISO 8601 datetime",
+                },
             )
 
     rows, has_more = await get_unified_events(
