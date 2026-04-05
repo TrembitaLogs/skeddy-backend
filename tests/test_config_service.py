@@ -9,10 +9,13 @@ from app.models.app_config import AppConfig
 from app.services.config_service import (
     CACHE_KEY,
     CACHE_KEY_INTERVAL,
+    CACHE_KEY_VERIFICATION_CHECK_INTERVAL,
     CACHE_KEY_VERIFICATION_DEADLINE,
+    DEFAULT_VERIFICATION_CHECK_INTERVAL_MINUTES,
     DEFAULT_VERIFICATION_DEADLINE_MINUTES,
     get_min_search_version,
     get_search_interval_config,
+    get_verification_check_interval_minutes,
     get_verification_deadline_minutes,
     set_min_search_version,
 )
@@ -302,3 +305,84 @@ async def test_verification_deadline_graceful_redis_failure(db_session):
     result = await get_verification_deadline_minutes(db_session, broken_redis)
 
     assert result == 15
+
+
+# ===========================================================================
+# get_verification_check_interval_minutes tests
+# ===========================================================================
+
+
+async def test_verification_check_interval_returns_cached(db_session, fake_redis):
+    """Returns cached value from Redis."""
+    fake_redis._store[CACHE_KEY_VERIFICATION_CHECK_INTERVAL] = "90"
+
+    result = await get_verification_check_interval_minutes(db_session, fake_redis)
+
+    assert result == 90
+
+
+async def test_verification_check_interval_falls_back_to_db(db_session, fake_redis):
+    """Falls back to DB on Redis miss and caches result."""
+    db_session.add(AppConfig(key="verification_check_interval_minutes", value="45"))
+    await db_session.commit()
+
+    result = await get_verification_check_interval_minutes(db_session, fake_redis)
+
+    assert result == 45
+    assert fake_redis._store.get(CACHE_KEY_VERIFICATION_CHECK_INTERVAL) == "45"
+
+
+async def test_verification_check_interval_falls_back_to_default(db_session, fake_redis):
+    """Returns default (60) when no DB row exists."""
+    result = await get_verification_check_interval_minutes(db_session, fake_redis)
+
+    assert result == DEFAULT_VERIFICATION_CHECK_INTERVAL_MINUTES
+
+
+async def test_verification_check_interval_invalid_db_value(db_session, fake_redis):
+    """Returns default when DB value is not a valid integer."""
+    db_session.add(AppConfig(key="verification_check_interval_minutes", value="not_a_number"))
+    await db_session.commit()
+
+    result = await get_verification_check_interval_minutes(db_session, fake_redis)
+
+    assert result == DEFAULT_VERIFICATION_CHECK_INTERVAL_MINUTES
+
+
+async def test_verification_check_interval_graceful_redis_failure(db_session):
+    """Falls back to DB when Redis raises RedisError."""
+    db_session.add(AppConfig(key="verification_check_interval_minutes", value="30"))
+    await db_session.commit()
+
+    broken_redis = AsyncMock()
+    broken_redis.get = AsyncMock(side_effect=RedisError("connection refused"))
+    broken_redis.setex = AsyncMock(side_effect=RedisError("connection refused"))
+
+    result = await get_verification_check_interval_minutes(db_session, broken_redis)
+
+    assert result == 30
+
+
+async def test_verification_check_interval_zero_is_valid(db_session, fake_redis):
+    """Special value 0 means verify only before deadline — must be preserved."""
+    db_session.add(AppConfig(key="verification_check_interval_minutes", value="0"))
+    await db_session.commit()
+
+    result = await get_verification_check_interval_minutes(db_session, fake_redis)
+
+    assert result == 0
+    assert fake_redis._store.get(CACHE_KEY_VERIFICATION_CHECK_INTERVAL) == "0"
+
+
+async def test_verification_check_interval_redis_setex_failure_still_returns(db_session):
+    """Returns DB value even when Redis setex fails after DB lookup."""
+    db_session.add(AppConfig(key="verification_check_interval_minutes", value="120"))
+    await db_session.commit()
+
+    broken_redis = AsyncMock()
+    broken_redis.get = AsyncMock(return_value=None)  # Cache miss
+    broken_redis.setex = AsyncMock(side_effect=RedisError("connection refused"))
+
+    result = await get_verification_check_interval_minutes(db_session, broken_redis)
+
+    assert result == 120
