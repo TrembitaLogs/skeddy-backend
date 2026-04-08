@@ -37,15 +37,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/credits", tags=["credits"])
 
 
-_google_play_service: GooglePlayService | None = None
+def _create_google_play_service() -> GooglePlayService:
+    """Create a GooglePlayService instance (separated for testability)."""
+    return GooglePlayService()
 
 
 def get_google_play_service() -> GooglePlayService:
-    """FastAPI dependency that provides a singleton GooglePlayService via DI."""
-    global _google_play_service
-    if _google_play_service is None:
-        _google_play_service = GooglePlayService()
-    return _google_play_service
+    """FastAPI dependency that provides GooglePlayService via DI."""
+    return _create_google_play_service()
 
 
 async def _handle_order_id_conflict(

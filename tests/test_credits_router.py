@@ -88,7 +88,7 @@ async def test_purchase_valid_request_returns_201(authenticated_client, db_sessi
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -123,7 +123,7 @@ async def test_purchase_creates_verified_order(authenticated_client, db_session,
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -159,7 +159,7 @@ async def test_purchase_creates_credit_transaction(authenticated_client, db_sess
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -205,7 +205,7 @@ async def test_purchase_unknown_product_returns_400(authenticated_client, db_ses
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -230,7 +230,7 @@ async def test_purchase_missing_config_returns_400(authenticated_client, db_sess
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -263,7 +263,7 @@ async def test_purchase_invalid_token_returns_400(authenticated_client, db_sessi
         )
     )
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -300,7 +300,7 @@ async def test_purchase_google_api_unavailable_verify_returns_503(
 
     mock_svc = _mock_gp_service(verify_error=OSError("Connection timeout"))
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -335,7 +335,7 @@ async def test_purchase_consume_fails_returns_503(authenticated_client, db_sessi
 
     mock_svc = _mock_gp_service(consume_result=False)
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -371,7 +371,7 @@ async def test_purchase_caches_credit_products_in_redis(
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -405,7 +405,7 @@ async def test_purchase_updates_redis_balance_cache(authenticated_client, db_ses
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -436,7 +436,7 @@ async def test_purchase_updates_db_balance(authenticated_client, db_session, fak
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -483,7 +483,7 @@ async def test_purchase_empty_product_id_returns_422(authenticated_client):
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -507,7 +507,7 @@ async def test_purchase_empty_purchase_token_returns_422(authenticated_client):
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -536,7 +536,7 @@ async def test_purchase_different_products_credit_correctly(
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         # Purchase credits_10
         resp = await auth.client.post(
             PURCHASE_URL,
@@ -593,7 +593,7 @@ async def test_purchase_verified_idempotent_returns_200(
     # POST with same purchase_token — Google API should NOT be called
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -643,7 +643,7 @@ async def test_purchase_consumed_recovery_credits_applied(
     # POST — recovery completes without any Google API calls
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -712,7 +712,7 @@ async def test_purchase_google_order_id_dedup_returns_200(
         )
     )
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -756,7 +756,7 @@ async def test_purchase_failed_recovery_succeeds(authenticated_client, db_sessio
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -804,7 +804,7 @@ async def test_purchase_already_consumed_skips_consume_call(
         )
     )
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -858,7 +858,7 @@ async def test_purchase_consumed_recovery_creates_transaction(
 
     mock_svc = _mock_gp_service()
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -952,7 +952,7 @@ async def test_purchase_token_race_verified_returns_200(
     mock_svc = _mock_gp_service()
 
     with (
-        mock_patch("app.routers.credits.get_google_play_service", return_value=mock_svc),
+        mock_patch("app.routers.credits._create_google_play_service", return_value=mock_svc),
         mock_patch.object(db_session, "commit", side_effect=mock_commit),
         mock_patch.object(db_session, "rollback", new_callable=AsyncMock),
     ):
@@ -1030,7 +1030,7 @@ async def test_purchase_token_race_pending_proceeds_to_verify(
     with (
         mock_patch.object(db_session, "commit", side_effect=mock_commit),
         mock_patch.object(db_session, "rollback", side_effect=mock_rollback),
-        mock_patch("app.routers.credits.get_google_play_service", return_value=mock_svc),
+        mock_patch("app.routers.credits._create_google_play_service", return_value=mock_svc),
     ):
         resp = await auth.client.post(
             PURCHASE_URL,
@@ -1116,7 +1116,7 @@ async def test_google_order_id_race_on_consume_returns_200(
     with (
         mock_patch.object(db_session, "commit", side_effect=mock_commit),
         mock_patch.object(db_session, "rollback", new_callable=AsyncMock),
-        mock_patch("app.routers.credits.get_google_play_service", return_value=mock_svc),
+        mock_patch("app.routers.credits._create_google_play_service", return_value=mock_svc),
     ):
         resp = await auth.client.post(
             PURCHASE_URL,
@@ -1152,7 +1152,7 @@ async def test_purchase_verify_timeout_returns_503(authenticated_client, db_sess
 
     mock_svc = _mock_gp_service(verify_error=TimeoutError("Google Play API timed out"))
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -1188,7 +1188,7 @@ async def test_purchase_verify_value_error_returns_503(
 
     mock_svc = _mock_gp_service(verify_error=ValueError("Malformed API response"))
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -1224,7 +1224,7 @@ async def test_purchase_verify_connection_reset_returns_503(
 
     mock_svc = _mock_gp_service(verify_error=ConnectionResetError("Connection reset by peer"))
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -1268,7 +1268,7 @@ async def test_purchase_verify_http_error_500_returns_503(
 
     mock_svc = _mock_gp_service(verify_error=http_error)
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -1312,7 +1312,7 @@ async def test_purchase_verify_http_error_502_returns_503(
 
     mock_svc = _mock_gp_service(verify_error=http_error)
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -1349,7 +1349,7 @@ async def test_purchase_consume_timeout_returns_503(authenticated_client, db_ses
         side_effect=TimeoutError("Google Play consume timed out")
     )
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
@@ -1386,7 +1386,7 @@ async def test_purchase_consume_network_error_returns_503(
     mock_svc = _mock_gp_service()
     mock_svc.consume_purchase = AsyncMock(side_effect=ConnectionError("Network unreachable"))
 
-    with patch("app.routers.credits.get_google_play_service", return_value=mock_svc):
+    with patch("app.routers.credits._create_google_play_service", return_value=mock_svc):
         resp = await auth.client.post(
             PURCHASE_URL,
             json={
