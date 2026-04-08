@@ -4,8 +4,8 @@ Reads eligible devices from the database, groups them into geographic
 clusters via ``build_clusters`` (H3 + Union-Find), computes penalty
 statuses and search intervals, then writes the result to Redis.
 
-Each cycle starts from a clean Redis state — all cluster keys are
-deleted before new clusters are written.
+New cluster data is written *before* stale keys are removed so that
+there is never a window where valid cluster state is absent.
 """
 
 import asyncio
@@ -50,6 +50,15 @@ _CLUSTER_KEY_PATTERNS = [
 INITIAL_DELAY_SECONDS = 10
 
 
+def _safe_int(value: str | int, default: int) -> int:
+    """Parse *value* as an integer, returning *default* on failure."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        logger.warning("Invalid int config value %r, using default %d", value, default)
+        return default
+
+
 async def get_clustering_config(
     db: AsyncSession,
 ) -> dict[str, bool | int]:
@@ -74,17 +83,20 @@ async def get_clustering_config(
 
     return {
         "enabled": enabled,
-        "penalty_minutes": int(
-            rows.get("clustering_penalty_minutes", DEFAULT_CLUSTERING_PENALTY_MINUTES)
+        "penalty_minutes": _safe_int(
+            rows.get("clustering_penalty_minutes", DEFAULT_CLUSTERING_PENALTY_MINUTES),
+            DEFAULT_CLUSTERING_PENALTY_MINUTES,
         ),
-        "threshold_miles": int(
-            rows.get("clustering_threshold_miles", DEFAULT_CLUSTERING_THRESHOLD_MILES)
+        "threshold_miles": _safe_int(
+            rows.get("clustering_threshold_miles", DEFAULT_CLUSTERING_THRESHOLD_MILES),
+            DEFAULT_CLUSTERING_THRESHOLD_MILES,
         ),
-        "rebuild_interval_minutes": int(
+        "rebuild_interval_minutes": _safe_int(
             rows.get(
                 "clustering_rebuild_interval_minutes",
                 DEFAULT_CLUSTERING_REBUILD_INTERVAL_MINUTES,
-            )
+            ),
+            DEFAULT_CLUSTERING_REBUILD_INTERVAL_MINUTES,
         ),
     }
 
@@ -192,17 +204,47 @@ async def clear_cluster_keys(redis) -> None:
                 break
 
 
+async def cleanup_stale_cluster_keys(
+    redis,
+    current_cluster_ids: set[str],
+    current_device_ids: set[str],
+) -> None:
+    """Remove cluster keys that are no longer part of the active set.
+
+    Unlike ``clear_cluster_keys`` this only deletes *stale* keys so
+    there is never a window where valid cluster data is missing.
+    """
+    keep_keys: set[str] = set()
+    for cid in current_cluster_ids:
+        keep_keys.add(f"device_cluster:{cid}")  # won't match, just placeholder
+        keep_keys.add(f"cluster:{cid}")
+        keep_keys.add(f"cluster_members:{cid}")
+        keep_keys.add(f"cluster_last_search:{cid}")
+    for did in current_device_ids:
+        keep_keys.add(f"device_cluster:{did}")
+
+    for pattern in _CLUSTER_KEY_PATTERNS:
+        cursor = 0
+        while True:
+            cursor, keys = await redis.scan(cursor=cursor, match=pattern, count=200)
+            stale = [k for k in keys if k not in keep_keys]
+            if stale:
+                await redis.delete(*stale)
+            if cursor == 0:
+                break
+
+
 async def run_cluster_manager() -> None:
     """Background task: rebuild device clusters every N minutes.
 
     Infinite loop that:
     1. Checks clustering_enabled feature flag
-    2. Clears all cluster Redis keys
-    3. Fetches eligible devices from DB
-    4. Builds clusters via H3 algorithm
-    5. Computes penalty statuses
-    6. Calculates search intervals
-    7. Writes results to Redis
+    2. Fetches eligible devices from DB
+    3. Builds clusters via H3 algorithm
+    4. Computes penalty statuses
+    5. Calculates search intervals
+    6. Writes results to Redis
+    7. Cleans up stale cluster keys (no gap — new data written first)
     8. Sleeps for rebuild_interval_minutes
     """
     logger.info("Cluster manager task started")
@@ -222,18 +264,17 @@ async def run_cluster_manager() -> None:
                     await asyncio.sleep(sleep_seconds)
                     continue
 
-                # Step 2: Clear Redis cluster keys
-                await clear_cluster_keys(redis_client)
-
-                # Step 3: Fetch eligible devices
+                # Step 2: Fetch eligible devices
                 devices = await get_eligible_devices(db)
                 logger.debug("Cluster manager: %d eligible device(s)", len(devices))
 
                 if not devices:
+                    # No eligible devices — clear all cluster state
+                    await clear_cluster_keys(redis_client)
                     await asyncio.sleep(sleep_seconds)
                     continue
 
-                # Step 4: Build clusters
+                # Step 3: Build clusters
                 device_dicts = devices_to_dicts(devices)
                 clusters = await build_clusters(
                     device_dicts,
@@ -243,10 +284,12 @@ async def run_cluster_manager() -> None:
 
                 if not clusters:
                     logger.debug("Cluster manager: no multi-device clusters formed")
+                    # No clusters — clear all cluster state
+                    await clear_cluster_keys(redis_client)
                     await asyncio.sleep(sleep_seconds)
                     continue
 
-                # Step 5: Compute penalty statuses per cluster
+                # Step 4: Compute penalty statuses per cluster
                 now_utc = datetime.now(UTC)
                 all_device_statuses: dict[str, str] = {}
                 cluster_params: dict[str, dict] = {}
@@ -263,7 +306,7 @@ async def run_cluster_manager() -> None:
                     )
                     all_device_statuses.update(statuses)
 
-                    # Step 6: Calculate search interval for this cluster
+                    # Step 5: Calculate search interval for this cluster
                     active_count = sum(1 for s in statuses.values() if s == "active")
 
                     if interval_config is not None and active_count > 0:
@@ -278,12 +321,19 @@ async def run_cluster_manager() -> None:
                         "search_interval": search_interval,
                     }
 
-                # Step 7: Write all clusters to Redis
+                # Step 6: Write new clusters to Redis (before cleanup)
                 await write_clusters_to_redis(
                     clusters,
                     all_device_statuses,
                     cluster_params,
                     redis_client,
+                )
+
+                # Step 7: Remove stale keys that no longer belong to active clusters
+                current_cluster_ids = set(clusters.keys())
+                current_device_ids = {d["device_id"] for devs in clusters.values() for d in devs}
+                await cleanup_stale_cluster_keys(
+                    redis_client, current_cluster_ids, current_device_ids
                 )
 
                 logger.info(
