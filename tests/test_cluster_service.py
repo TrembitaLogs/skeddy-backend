@@ -636,14 +636,20 @@ class TestConcurrentRemoveDevice:
         redis._store["cluster:c1"] = json.dumps({"active_members": 3, "search_interval": 15})
         redis._sets_store["cluster_members:c1"] = {"d1", "d2", "d3"}
 
-        # Sequential removals (Lua ensures each sees updated state)
+        # Sequential removals — each atomically decrements active_members
         await remove_device_from_cluster("d1", redis)
         await remove_device_from_cluster("d2", redis)
 
-        # d3 should be the last member, cluster cleaned up
-        assert "cluster:c1" not in redis._store
+        # d1/d2 removed, but d3 still present → active_members=1, cluster still alive
         assert "device_cluster:d1" not in redis._store
         assert "device_cluster:d2" not in redis._store
+        cluster_data = json.loads(redis._store["cluster:c1"])
+        assert cluster_data["active_members"] == 1
+
+        # Removing the last member triggers full cleanup
+        await remove_device_from_cluster("d3", redis)
+        assert "cluster:c1" not in redis._store
+        assert "device_cluster:d3" not in redis._store
 
     async def test_removal_preserves_remaining_members(self):
         redis = _make_cluster_redis()
