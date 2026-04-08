@@ -233,7 +233,7 @@ async def remove_device_from_cluster(device_id: str, redis: Redis) -> None:
 
     try:
         await redis.delete(dc_key)
-        await redis.srem(members_key, device_id)
+        await redis.srem(members_key, device_id)  # type: ignore[misc]
 
         # Decrement active_members
         cluster_raw = await redis.get(cluster_key)
@@ -303,7 +303,7 @@ async def penalize_device_in_cluster(device_id: str, redis: Redis) -> None:
 
         if cluster_data["active_members"] <= 0:
             # All penalized — reset everyone to active
-            member_ids = await redis.smembers(members_key)
+            member_ids = await redis.smembers(members_key)  # type: ignore[misc]
             total_members = len(member_ids) if member_ids else 0
 
             for mid in member_ids or []:
@@ -386,7 +386,7 @@ async def cluster_gate(
         search_interval = cluster_data.get("search_interval", 15)
 
         now = time.time()
-        result = await redis.eval(
+        result = await redis.eval(  # type: ignore[misc]
             CLUSTER_GATE_LUA,
             1,
             last_search_key,
