@@ -15,6 +15,7 @@ from app.middleware.rate_limiter import get_device_key, limiter
 from app.models.paired_device import PairedDevice
 from app.redis import get_redis
 from app.schemas.ping import PingFiltersResponse, PingRequest, PingResponse, VerifyRideItem
+from app.services.cluster_service import cluster_gate
 from app.services.config_service import batch_get_ping_configs
 from app.services.credit_service import cache_balance, get_balance
 from app.services.fcm_service import send_ride_credit_refunded, send_search_update_required
@@ -173,6 +174,19 @@ async def ping(
             )
         else:
             interval = settings.DEFAULT_SEARCH_INTERVAL_SECONDS
+
+        # 11. Cluster gate — coordinate search among clustered devices.
+        # Only runs when search_active=True. cluster_gate returns None for
+        # solo devices or when clustering is disabled (existing logic applies).
+        cluster_result = await cluster_gate(
+            device_id=str(device.id),
+            redis=redis,
+            clustering_enabled=configs.clustering_enabled,
+        )
+        if cluster_result is not None:
+            search_active = cluster_result["search"]
+            interval = cluster_result["interval_seconds"]
+
     device.last_interval_sent = interval
     await db.commit()
 

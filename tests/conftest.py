@@ -173,10 +173,14 @@ async def app_client(db_session, fake_redis):
             view_cls.session_maker = test_session_maker
 
     # Dashboard and other BaseView subclasses use AsyncSessionLocal directly
+    import app.admin.cluster_map as cluster_map_mod
     import app.admin.dashboard as dashboard_mod
 
     orig_session_local = dashboard_mod.AsyncSessionLocal
     dashboard_mod.AsyncSessionLocal = test_session_maker
+
+    orig_cluster_session = cluster_map_mod.AsyncSessionLocal
+    cluster_map_mod.AsyncSessionLocal = test_session_maker
 
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -187,6 +191,7 @@ async def app_client(db_session, fake_redis):
         yield client
 
     dashboard_mod.AsyncSessionLocal = orig_session_local
+    cluster_map_mod.AsyncSessionLocal = orig_cluster_session
     for view_cls, orig in originals.items():
         view_cls.session_maker = orig
     await test_engine.dispose()

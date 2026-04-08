@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ride import Ride
 from app.models.user import User
 from app.schemas.fcm import NotificationType, create_ride_accepted_payload
+from app.services.cluster_service import penalize_device_in_cluster
 from app.services.credit_service import cache_balance, charge_credits, get_ride_credit_cost
 from app.services.fcm_service import send_credits_depleted, send_push
 
@@ -473,8 +474,13 @@ async def create_ride_with_charge(
     ride_hash: str,
     price: float,
     verification_deadline: datetime | None,
+    device_id: str | None = None,
 ) -> tuple[Ride, int, int]:
     """Create a ride, charge credits, and commit atomically.
+
+    When ``device_id`` is provided, penalizes the device in its cluster
+    after a successful commit so that other cluster members get priority
+    in the next search cycle.
 
     Returns:
         Tuple of (ride, credits_charged, new_balance).
@@ -500,6 +506,16 @@ async def create_ride_with_charge(
 
     if charged > 0:
         await cache_balance(user_id, new_balance, redis)
+
+    if device_id:
+        try:
+            await penalize_device_in_cluster(device_id, redis)
+        except Exception:
+            logger.warning(
+                "Failed to penalize device %s in cluster after ride creation",
+                device_id,
+                exc_info=True,
+            )
 
     return ride, charged, new_balance
 

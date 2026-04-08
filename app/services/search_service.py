@@ -1,10 +1,15 @@
+import logging
 from uuid import UUID
 
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.paired_device import PairedDevice
 from app.models.search_status import SearchStatus
+from app.services.cluster_service import remove_device_from_cluster
+
+logger = logging.getLogger(__name__)
 
 
 async def get_search_status(db: AsyncSession, user_id: UUID) -> SearchStatus:
@@ -43,11 +48,17 @@ async def get_search_status_with_device(
     return row[0], row[1]
 
 
-async def set_search_active(db: AsyncSession, user_id: UUID, *, active: bool) -> None:
+async def set_search_active(
+    db: AsyncSession, user_id: UUID, *, active: bool, redis: Redis | None = None
+) -> None:
     """Set the is_active flag on the user's search status.
 
     Uses ORM-style update so that the ``onupdate=func.now()`` clause
     on ``updated_at`` fires automatically.  Creates a row if none exists.
+
+    When search is deactivated and ``redis`` is provided, the device is
+    immediately removed from its cluster (if any) so the next cron cycle
+    does not treat it as an active participant.
     """
     result = await db.execute(select(SearchStatus).where(SearchStatus.user_id == user_id))
     status = result.scalar_one_or_none()
@@ -57,3 +68,18 @@ async def set_search_active(db: AsyncSession, user_id: UUID, *, active: bool) ->
     else:
         status.is_active = active
     await db.commit()
+
+    if not active and redis is not None:
+        try:
+            device_result = await db.execute(
+                select(PairedDevice.device_id).where(PairedDevice.user_id == user_id)
+            )
+            device_id = device_result.scalar_one_or_none()
+            if device_id:
+                await remove_device_from_cluster(device_id, redis)
+        except Exception:
+            logger.warning(
+                "Failed to remove device from cluster after search deactivation for user %s",
+                user_id,
+                exc_info=True,
+            )
