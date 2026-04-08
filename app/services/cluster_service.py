@@ -48,6 +48,115 @@ end
 """
 
 # ---------------------------------------------------------------------------
+# Lua script for atomic device removal from cluster
+# ---------------------------------------------------------------------------
+
+REMOVE_DEVICE_LUA = """
+-- KEYS[1] = device_cluster:{device_id}
+-- KEYS[2] = cluster:{cluster_id}
+-- KEYS[3] = cluster_members:{cluster_id}
+-- KEYS[4] = cluster_last_search:{cluster_id}
+-- ARGV[1] = device_id
+-- ARGV[2] = default CLUSTER_TTL
+
+redis.call('DEL', KEYS[1])
+redis.call('SREM', KEYS[3], ARGV[1])
+
+local cluster_raw = redis.call('GET', KEYS[2])
+if not cluster_raw then
+    return 0
+end
+
+local cluster = cjson.decode(cluster_raw)
+local active = (cluster['active_members'] or 1) - 1
+if active < 0 then active = 0 end
+
+if active <= 0 then
+    redis.call('DEL', KEYS[2], KEYS[3], KEYS[4])
+    return 2
+else
+    cluster['active_members'] = active
+    local ttl = redis.call('TTL', KEYS[2])
+    if ttl > 0 then
+        redis.call('SETEX', KEYS[2], ttl, cjson.encode(cluster))
+    else
+        redis.call('SETEX', KEYS[2], tonumber(ARGV[2]), cjson.encode(cluster))
+    end
+    return 1
+end
+"""
+
+# ---------------------------------------------------------------------------
+# Lua script for atomic device penalization in cluster
+# ---------------------------------------------------------------------------
+
+PENALIZE_DEVICE_LUA = """
+-- KEYS[1] = device_cluster:{device_id}
+-- KEYS[2] = cluster:{cluster_id}
+-- KEYS[3] = cluster_members:{cluster_id}
+-- ARGV[1] = device_id
+-- ARGV[2] = default CLUSTER_TTL
+-- ARGV[3] = device_cluster key prefix ("device_cluster:")
+
+local dc_raw = redis.call('GET', KEYS[1])
+if not dc_raw then
+    return 0
+end
+
+local dc_data = cjson.decode(dc_raw)
+dc_data['status'] = 'penalized'
+
+local dc_ttl = redis.call('TTL', KEYS[1])
+if dc_ttl > 0 then
+    redis.call('SETEX', KEYS[1], dc_ttl, cjson.encode(dc_data))
+else
+    redis.call('SETEX', KEYS[1], tonumber(ARGV[2]), cjson.encode(dc_data))
+end
+
+local cluster_raw = redis.call('GET', KEYS[2])
+if not cluster_raw then
+    return 1
+end
+
+local cluster = cjson.decode(cluster_raw)
+local active = (cluster['active_members'] or 1) - 1
+if active < 0 then active = 0 end
+
+if active <= 0 then
+    local member_ids = redis.call('SMEMBERS', KEYS[3])
+    local total = #member_ids
+
+    for _, mid in ipairs(member_ids) do
+        local mid_key = ARGV[3] .. mid
+        local mid_raw = redis.call('GET', mid_key)
+        if mid_raw then
+            local mid_data = cjson.decode(mid_raw)
+            mid_data['status'] = 'active'
+            local mid_ttl = redis.call('TTL', mid_key)
+            if mid_ttl > 0 then
+                redis.call('SETEX', mid_key, mid_ttl, cjson.encode(mid_data))
+            else
+                redis.call('SETEX', mid_key, tonumber(ARGV[2]), cjson.encode(mid_data))
+            end
+        end
+    end
+
+    cluster['active_members'] = total
+else
+    cluster['active_members'] = active
+end
+
+local cluster_ttl = redis.call('TTL', KEYS[2])
+if cluster_ttl > 0 then
+    redis.call('SETEX', KEYS[2], cluster_ttl, cjson.encode(cluster))
+else
+    redis.call('SETEX', KEYS[2], tonumber(ARGV[2]), cjson.encode(cluster))
+end
+
+return active <= 0 and 2 or 1
+"""
+
+# ---------------------------------------------------------------------------
 # Haversine distance (miles)
 # ---------------------------------------------------------------------------
 
@@ -205,7 +314,7 @@ async def write_clusters_to_redis(
 
 
 async def remove_device_from_cluster(device_id: str, redis: Redis) -> None:
-    """Remove a device from its cluster in Redis.
+    """Remove a device from its cluster in Redis (atomic via Lua).
 
     If the device is solo (no cluster key), this is a no-op.
     If the device was the last member, cleans up all cluster keys.
@@ -232,24 +341,16 @@ async def remove_device_from_cluster(device_id: str, redis: Redis) -> None:
     last_search_key = CLUSTER_LAST_SEARCH_KEY.format(cluster_id=cluster_id)
 
     try:
-        await redis.delete(dc_key)
-        await redis.srem(members_key, device_id)  # type: ignore[misc]
-
-        # Decrement active_members
-        cluster_raw = await redis.get(cluster_key)
-        if cluster_raw is not None:
-            cluster_data = json.loads(cluster_raw)
-            cluster_data["active_members"] = max(0, cluster_data.get("active_members", 1) - 1)
-
-            if cluster_data["active_members"] <= 0:
-                # Last member — clean up cluster keys
-                await redis.delete(cluster_key, members_key, last_search_key)
-            else:
-                ttl = await redis.ttl(cluster_key)
-                if ttl > 0:
-                    await redis.setex(cluster_key, ttl, json.dumps(cluster_data))
-                else:
-                    await redis.setex(cluster_key, CLUSTER_TTL, json.dumps(cluster_data))
+        await redis.eval(  # type: ignore[misc]
+            REMOVE_DEVICE_LUA,
+            4,
+            dc_key,
+            cluster_key,
+            members_key,
+            last_search_key,
+            device_id,
+            str(CLUSTER_TTL),
+        )
     except RedisError:
         logger.warning("Redis error during remove_device_from_cluster for %s", device_id)
 
@@ -260,7 +361,7 @@ async def remove_device_from_cluster(device_id: str, redis: Redis) -> None:
 
 
 async def penalize_device_in_cluster(device_id: str, redis: Redis) -> None:
-    """Mark a device as penalized within its cluster.
+    """Mark a device as penalized within its cluster (atomic via Lua).
 
     If all members become penalized, reset all penalties (everyone becomes active).
     """
@@ -285,47 +386,16 @@ async def penalize_device_in_cluster(device_id: str, redis: Redis) -> None:
     members_key = CLUSTER_MEMBERS_KEY.format(cluster_id=cluster_id)
 
     try:
-        # Update device status to penalized
-        data["status"] = "penalized"
-        ttl = await redis.ttl(dc_key)
-        if ttl > 0:
-            await redis.setex(dc_key, ttl, json.dumps(data))
-        else:
-            await redis.setex(dc_key, CLUSTER_TTL, json.dumps(data))
-
-        # Decrement active_members in cluster
-        cluster_raw = await redis.get(cluster_key)
-        if cluster_raw is None:
-            return
-
-        cluster_data = json.loads(cluster_raw)
-        cluster_data["active_members"] = max(0, cluster_data.get("active_members", 1) - 1)
-
-        if cluster_data["active_members"] <= 0:
-            # All penalized — reset everyone to active
-            member_ids = await redis.smembers(members_key)  # type: ignore[misc]
-            total_members = len(member_ids) if member_ids else 0
-
-            for mid in member_ids or []:
-                mid_key = DEVICE_CLUSTER_KEY.format(device_id=mid)
-                mid_raw = await redis.get(mid_key)
-                if mid_raw is not None:
-                    mid_data = json.loads(mid_raw)
-                    mid_data["status"] = "active"
-                    mid_ttl = await redis.ttl(mid_key)
-                    if mid_ttl > 0:
-                        await redis.setex(mid_key, mid_ttl, json.dumps(mid_data))
-                    else:
-                        await redis.setex(mid_key, CLUSTER_TTL, json.dumps(mid_data))
-
-            cluster_data["active_members"] = total_members
-
-        cluster_ttl = await redis.ttl(cluster_key)
-        if cluster_ttl > 0:
-            await redis.setex(cluster_key, cluster_ttl, json.dumps(cluster_data))
-        else:
-            await redis.setex(cluster_key, CLUSTER_TTL, json.dumps(cluster_data))
-
+        await redis.eval(  # type: ignore[misc]
+            PENALIZE_DEVICE_LUA,
+            3,
+            dc_key,
+            cluster_key,
+            members_key,
+            device_id,
+            str(CLUSTER_TTL),
+            "device_cluster:",
+        )
     except RedisError:
         logger.warning("Redis error during penalize_device_in_cluster for %s", device_id)
 
