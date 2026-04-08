@@ -58,7 +58,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     path,
                 )
                 return JSONResponse(
-                    {"error": {"code": "csrf_failed", "message": "CSRF validation failed"}},
+                    {"error": {"code": "CSRF_FAILED", "message": "CSRF validation failed"}},
                     status_code=403,
                 )
 

@@ -1,6 +1,7 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AcceptFailureItem(BaseModel):
@@ -47,6 +48,16 @@ class PingRequest(BaseModel):
     """Request schema for POST /ping from search device."""
 
     timezone: str = Field(min_length=1)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, KeyError, ValueError):
+            raise ValueError("INVALID_TIMEZONE")
+        return v
+
     app_version: str = Field(min_length=1)
     device_health: DeviceHealth | None = None
     stats: PingStats | None = None

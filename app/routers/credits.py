@@ -1,7 +1,6 @@
 """Credit purchase endpoint for Google Play in-app purchases."""
 
 import logging
-from functools import lru_cache
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -38,15 +37,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/credits", tags=["credits"])
 
 
-@lru_cache(maxsize=1)
-def _create_google_play_service() -> GooglePlayService:
-    """Create and cache a singleton GooglePlayService instance."""
-    return GooglePlayService()
+_google_play_service: GooglePlayService | None = None
 
 
 def get_google_play_service() -> GooglePlayService:
-    """FastAPI dependency that provides GooglePlayService via DI."""
-    return _create_google_play_service()
+    """FastAPI dependency that provides a singleton GooglePlayService via DI."""
+    global _google_play_service
+    if _google_play_service is None:
+        _google_play_service = GooglePlayService()
+    return _google_play_service
 
 
 async def _handle_order_id_conflict(
@@ -161,6 +160,9 @@ async def purchase_credits(
     product = products.get_product_by_id(body.product_id)
     if product is None:
         raise HTTPException(status_code=400, detail="UNKNOWN_PRODUCT")
+    if product.credits <= 0:
+        logger.error("Product %s has non-positive credits: %d", body.product_id, product.credits)
+        raise HTTPException(status_code=400, detail="INVALID_PRODUCT_CONFIG")
     credits_amount = product.credits
 
     # 2. Lookup existing PurchaseOrder by purchase_token (idempotency)
