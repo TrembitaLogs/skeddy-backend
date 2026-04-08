@@ -43,7 +43,6 @@ htmlcov/
 .claude/
 .taskmaster/
 .mcp.json
-CLAUDE.md
 
 # Firebase credentials
 firebase-credentials.json
