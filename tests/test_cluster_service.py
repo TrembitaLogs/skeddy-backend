@@ -78,18 +78,91 @@ def _make_cluster_redis():
         return 1 if key in store or key in sets_store else 0
 
     async def mock_eval(script, numkeys, *args):
-        # Simplified Lua script emulation for CLUSTER_GATE_LUA
-        key = args[0]
-        now = float(args[1])
-        interval = float(args[2])
-        # args[3] is ttl — unused in emulation, Redis handles it
+        if numkeys == 1:
+            # CLUSTER_GATE_LUA emulation
+            key = args[0]
+            now = float(args[1])
+            interval = float(args[2])
 
-        last = store.get(key)
-        if last is None or (now - float(last)) >= interval:
-            store[key] = str(now)
-            return 1
-        else:
-            return math.ceil(interval - (now - float(last)))
+            last = store.get(key)
+            if last is None or (now - float(last)) >= interval:
+                store[key] = str(now)
+                return 1
+            else:
+                return math.ceil(interval - (now - float(last)))
+
+        elif numkeys == 4:
+            # REMOVE_DEVICE_LUA emulation
+            dc_key, cluster_key, members_key, last_search_key = (
+                args[0],
+                args[1],
+                args[2],
+                args[3],
+            )
+            device_id = args[4]
+            _default_ttl = int(args[5])
+
+            store.pop(dc_key, None)
+            if members_key in sets_store:
+                sets_store[members_key].discard(device_id)
+
+            cluster_raw = store.get(cluster_key)
+            if cluster_raw is None:
+                return 0
+
+            cluster_data = json.loads(cluster_raw)
+            active = max(0, cluster_data.get("active_members", 1) - 1)
+
+            if active <= 0:
+                store.pop(cluster_key, None)
+                store.pop(last_search_key, None)
+                sets_store.pop(members_key, None)
+                return 2
+            else:
+                cluster_data["active_members"] = active
+                store[cluster_key] = json.dumps(cluster_data)
+                return 1
+
+        elif numkeys == 3:
+            # PENALIZE_DEVICE_LUA emulation
+            dc_key, cluster_key, members_key = args[0], args[1], args[2]
+            _device_id = args[3]
+            _default_ttl = int(args[4])
+            dc_prefix = args[5]
+
+            dc_raw = store.get(dc_key)
+            if dc_raw is None:
+                return 0
+
+            dc_data = json.loads(dc_raw)
+            dc_data["status"] = "penalized"
+            store[dc_key] = json.dumps(dc_data)
+
+            cluster_raw = store.get(cluster_key)
+            if cluster_raw is None:
+                return 1
+
+            cluster_data = json.loads(cluster_raw)
+            active = max(0, cluster_data.get("active_members", 1) - 1)
+
+            if active <= 0:
+                member_ids = sets_store.get(members_key, set())
+                total = len(member_ids)
+                for mid in member_ids:
+                    mid_key = dc_prefix + mid
+                    mid_raw = store.get(mid_key)
+                    if mid_raw is not None:
+                        mid_data = json.loads(mid_raw)
+                        mid_data["status"] = "active"
+                        store[mid_key] = json.dumps(mid_data)
+                cluster_data["active_members"] = total
+            else:
+                cluster_data["active_members"] = active
+
+            store[cluster_key] = json.dumps(cluster_data)
+            return 2 if active <= 0 else 1
+
+        return None
 
     def mock_pipeline():
         """Return a fake pipeline that collects and executes commands."""
@@ -545,3 +618,122 @@ class TestClusterGate:
 
         result = await cluster_gate("d1", redis, clustering_enabled=True)
         assert result is None
+
+
+# ===========================================================================
+# Concurrent scenario tests — verify Lua atomicity logic
+# ===========================================================================
+
+
+class TestConcurrentRemoveDevice:
+    """Verify that concurrent removals produce correct active_members counts."""
+
+    async def test_two_concurrent_removals_from_three_member_cluster(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["device_cluster:d2"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["device_cluster:d3"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["cluster:c1"] = json.dumps({"active_members": 3, "search_interval": 15})
+        redis._sets_store["cluster_members:c1"] = {"d1", "d2", "d3"}
+
+        # Sequential removals — each atomically decrements active_members
+        await remove_device_from_cluster("d1", redis)
+        await remove_device_from_cluster("d2", redis)
+
+        # d1/d2 removed, but d3 still present → active_members=1, cluster still alive
+        assert "device_cluster:d1" not in redis._store
+        assert "device_cluster:d2" not in redis._store
+        cluster_data = json.loads(redis._store["cluster:c1"])
+        assert cluster_data["active_members"] == 1
+
+        # Removing the last member triggers full cleanup
+        await remove_device_from_cluster("d3", redis)
+        assert "cluster:c1" not in redis._store
+        assert "device_cluster:d3" not in redis._store
+
+    async def test_removal_preserves_remaining_members(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["device_cluster:d2"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["device_cluster:d3"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["cluster:c1"] = json.dumps({"active_members": 3, "search_interval": 15})
+        redis._sets_store["cluster_members:c1"] = {"d1", "d2", "d3"}
+
+        await remove_device_from_cluster("d1", redis)
+
+        cluster_data = json.loads(redis._store["cluster:c1"])
+        assert cluster_data["active_members"] == 2
+        assert "d1" not in redis._sets_store["cluster_members:c1"]
+        assert "d2" in redis._sets_store["cluster_members:c1"]
+
+    async def test_removal_with_expired_cluster_key(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._sets_store["cluster_members:c1"] = {"d1", "d2"}
+        # cluster:c1 key expired — not in store
+
+        await remove_device_from_cluster("d1", redis)
+
+        # Device key removed, but no cluster to update
+        assert "device_cluster:d1" not in redis._store
+
+    async def test_removal_redis_error_on_eval(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["cluster:c1"] = json.dumps({"active_members": 2, "search_interval": 15})
+        redis.eval = AsyncMock(side_effect=RedisError("NOSCRIPT"))
+
+        await remove_device_from_cluster("d1", redis)
+        # Should not raise — error handled gracefully
+
+
+class TestConcurrentPenalizeDevice:
+    """Verify that concurrent penalizations produce correct state."""
+
+    async def test_sequential_penalize_triggers_reset(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["device_cluster:d2"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["device_cluster:d3"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["cluster:c1"] = json.dumps({"active_members": 3, "search_interval": 15})
+        redis._sets_store["cluster_members:c1"] = {"d1", "d2", "d3"}
+
+        await penalize_device_in_cluster("d1", redis)
+        await penalize_device_in_cluster("d2", redis)
+
+        # Two penalized, one still active
+        cluster_data = json.loads(redis._store["cluster:c1"])
+        assert cluster_data["active_members"] == 1
+
+        d1_data = json.loads(redis._store["device_cluster:d1"])
+        assert d1_data["status"] == "penalized"
+
+        # Now penalize the last one — should reset all
+        await penalize_device_in_cluster("d3", redis)
+
+        cluster_data = json.loads(redis._store["cluster:c1"])
+        assert cluster_data["active_members"] == 3
+
+        for did in ("d1", "d2", "d3"):
+            d_data = json.loads(redis._store[f"device_cluster:{did}"])
+            assert d_data["status"] == "active"
+
+    async def test_penalize_with_expired_cluster(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        # cluster:c1 expired — not in store
+
+        await penalize_device_in_cluster("d1", redis)
+
+        # Device should still be marked penalized
+        d1_data = json.loads(redis._store["device_cluster:d1"])
+        assert d1_data["status"] == "penalized"
+
+    async def test_penalize_redis_error_on_eval(self):
+        redis = _make_cluster_redis()
+        redis._store["device_cluster:d1"] = json.dumps({"cluster_id": "c1", "status": "active"})
+        redis._store["cluster:c1"] = json.dumps({"active_members": 2, "search_interval": 15})
+        redis.eval = AsyncMock(side_effect=RedisError("NOSCRIPT"))
+
+        await penalize_device_in_cluster("d1", redis)
+        # Should not raise — error handled gracefully
