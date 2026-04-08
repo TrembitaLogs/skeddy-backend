@@ -145,10 +145,17 @@ async def test_reset_password_5_wrong_attempts_invalidates_code(app_client, fake
     await _register_user(app_client, email=email)
     await _store_reset_code_in_redis(fake_redis, email)
 
-    # Mock time.time to always return a value far in the future relative to
-    # last_failed_at, bypassing exponential backoff delays.
+    # Mock time.time to advance by 1000s on each call, ensuring the
+    # exponential backoff window (max 60s) is always satisfied.
+    call_count = 0
+
+    def advancing_time():
+        nonlocal call_count
+        call_count += 1
+        return call_count * 1000.0
+
     with patch("app.services.auth_service.time") as mock_time:
-        mock_time.time.return_value = 1e12
+        mock_time.time.side_effect = advancing_time
 
         # Make 5 wrong attempts
         for _i in range(5):
