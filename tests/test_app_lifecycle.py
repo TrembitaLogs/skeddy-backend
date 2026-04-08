@@ -1,7 +1,7 @@
 """Tests for billing background tasks integration in app lifecycle (task 8.5).
 
 Test strategy:
-1. All 7 background tasks are created during lifespan startup
+1. All 8 background tasks are created during lifespan startup
 2. Graceful shutdown: all tasks cancelled without errors
 3. Checkpoint preserved across shutdown/restart cycles
 4. Integration test with full app lifecycle (health endpoint)
@@ -25,6 +25,7 @@ TASK_MODULES = {
     "app.main.run_verification_fallback": "ride_verification",
     "app.main.run_purchase_recovery": "purchase_recovery",
     "app.main.run_balance_reconciliation": "balance_reconciliation",
+    "app.main.run_cluster_manager": "cluster_manager",
 }
 
 
@@ -48,7 +49,7 @@ def _make_mock_coroutine(name: str) -> AsyncMock:
 class TestLifespanStartup:
     @pytest.mark.asyncio
     async def test_all_background_tasks_created(self):
-        """Lifespan creates asyncio tasks for all 7 background functions."""
+        """Lifespan creates asyncio tasks for all 8 background functions."""
         mocks = {path: _make_mock_coroutine(name) for path, name in TASK_MODULES.items()}
         created_tasks: list[asyncio.Task] = []
         original_create_task = asyncio.create_task
@@ -68,8 +69,8 @@ class TestLifespanStartup:
             with patch("asyncio.create_task", side_effect=tracking_create_task):
                 mock_app = MagicMock()
                 async with lifespan(mock_app):
-                    # All 7 tasks should have been created
-                    assert len(created_tasks) == 7
+                    # All 8 tasks should have been created
+                    assert len(created_tasks) == 8
 
                     # Verify all mocks were called (coroutine started)
                     for path, mock_fn in mocks.items():
