@@ -28,6 +28,8 @@ from app.tasks.cluster_manager import (
     DEFAULT_CLUSTERING_PENALTY_MINUTES,
     DEFAULT_CLUSTERING_REBUILD_INTERVAL_MINUTES,
     DEFAULT_CLUSTERING_THRESHOLD_MILES,
+    _safe_int,
+    cleanup_stale_cluster_keys,
     clear_cluster_keys,
     compute_member_statuses,
     devices_to_dicts,
@@ -89,6 +91,31 @@ def _make_ride(
 
 
 # ---------------------------------------------------------------------------
+# _safe_int
+# ---------------------------------------------------------------------------
+
+
+def test_safe_int_valid():
+    assert _safe_int("42", 10) == 42
+
+
+def test_safe_int_non_numeric_returns_default():
+    assert _safe_int("abc", 10) == 10
+
+
+def test_safe_int_empty_string_returns_default():
+    assert _safe_int("", 5) == 5
+
+
+def test_safe_int_none_returns_default():
+    assert _safe_int(None, 7) == 7
+
+
+def test_safe_int_already_int():
+    assert _safe_int(99, 10) == 99
+
+
+# ---------------------------------------------------------------------------
 # get_clustering_config
 # ---------------------------------------------------------------------------
 
@@ -143,6 +170,96 @@ async def test_get_clustering_config_disabled_variants(db_session):
         config = await get_clustering_config(db_session)
         assert config["enabled"] is False, f"Expected False for value '{val}'"
         await db_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_get_clustering_config_non_numeric_falls_back(db_session):
+    """Non-numeric config values fall back to defaults instead of crashing."""
+    db_session.add_all(
+        [
+            AppConfig(key="clustering_penalty_minutes", value="not_a_number"),
+            AppConfig(key="clustering_threshold_miles", value="abc"),
+            AppConfig(key="clustering_rebuild_interval_minutes", value=""),
+        ]
+    )
+    await db_session.flush()
+
+    config = await get_clustering_config(db_session)
+    assert config["penalty_minutes"] == DEFAULT_CLUSTERING_PENALTY_MINUTES
+    assert config["threshold_miles"] == DEFAULT_CLUSTERING_THRESHOLD_MILES
+    assert config["rebuild_interval_minutes"] == DEFAULT_CLUSTERING_REBUILD_INTERVAL_MINUTES
+
+
+# ---------------------------------------------------------------------------
+# cleanup_stale_cluster_keys
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_cluster_keys_removes_only_stale():
+    """Only keys not in the current set are deleted."""
+    mock_redis = AsyncMock()
+
+    # Simulate existing keys: cluster c1 (current) and c2 (stale)
+    async def mock_scan(cursor=0, match="", count=200):
+        if "device_cluster" in match:
+            return (0, ["device_cluster:d1", "device_cluster:d_old"])
+        if match == "cluster:*":
+            return (0, ["cluster:c1", "cluster:c2"])
+        if "cluster_members" in match:
+            return (0, ["cluster_members:c1", "cluster_members:c2"])
+        if "cluster_last_search" in match:
+            return (0, ["cluster_last_search:c1", "cluster_last_search:c2"])
+        return (0, [])
+
+    mock_redis.scan = AsyncMock(side_effect=mock_scan)
+    mock_redis.delete = AsyncMock()
+
+    await cleanup_stale_cluster_keys(
+        mock_redis,
+        current_cluster_ids={"c1"},
+        current_device_ids={"d1"},
+    )
+
+    # Collect all deleted keys across calls
+    deleted = []
+    for call in mock_redis.delete.call_args_list:
+        deleted.extend(call.args)
+
+    # Stale keys should be deleted
+    assert "device_cluster:d_old" in deleted
+    assert "cluster:c2" in deleted
+    assert "cluster_members:c2" in deleted
+    assert "cluster_last_search:c2" in deleted
+    # Current keys should NOT be deleted
+    assert "device_cluster:d1" not in deleted
+    assert "cluster:c1" not in deleted
+    assert "cluster_members:c1" not in deleted
+    assert "cluster_last_search:c1" not in deleted
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_cluster_keys_nothing_stale():
+    """No stale keys → no deletes."""
+    mock_redis = AsyncMock()
+
+    async def mock_scan(cursor=0, match="", count=200):
+        if "device_cluster" in match:
+            return (0, ["device_cluster:d1"])
+        if match == "cluster:*":
+            return (0, ["cluster:c1"])
+        return (0, [])
+
+    mock_redis.scan = AsyncMock(side_effect=mock_scan)
+    mock_redis.delete = AsyncMock()
+
+    await cleanup_stale_cluster_keys(
+        mock_redis,
+        current_cluster_ids={"c1"},
+        current_device_ids={"d1"},
+    )
+
+    mock_redis.delete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +607,7 @@ async def test_run_cluster_manager_disabled():
 
 @pytest.mark.asyncio
 async def test_run_cluster_manager_no_eligible_devices():
-    """Enabled but no eligible devices → skip cluster building."""
+    """Enabled but no eligible devices → clear keys, skip cluster building."""
     call_count = 0
     _mock_db, mock_session = _make_mock_session()
 
@@ -545,7 +662,7 @@ async def test_run_cluster_manager_no_eligible_devices():
 
 @pytest.mark.asyncio
 async def test_run_cluster_manager_full_cycle():
-    """Full cycle: eligible devices → clusters → statuses → Redis write."""
+    """Full cycle: eligible devices → clusters → statuses → Redis write → stale cleanup."""
     call_count = 0
     _mock_db, mock_session = _make_mock_session()
 
@@ -578,9 +695,9 @@ async def test_run_cluster_manager_full_cycle():
             },
         ),
         patch(
-            "app.tasks.cluster_manager.clear_cluster_keys",
+            "app.tasks.cluster_manager.cleanup_stale_cluster_keys",
             new_callable=AsyncMock,
-        ),
+        ) as mock_cleanup,
         patch(
             "app.tasks.cluster_manager.get_eligible_devices",
             new_callable=AsyncMock,
@@ -635,10 +752,16 @@ async def test_run_cluster_manager_full_cycle():
         assert call_args[2]["cluster-abc"]["active_members"] == 2
         assert call_args[2]["cluster-abc"]["search_interval"] == 30
 
+        # Verify stale cleanup was called with correct cluster/device ids
+        mock_cleanup.assert_called_once()
+        cleanup_args = mock_cleanup.call_args[0]
+        assert cleanup_args[1] == {"cluster-abc"}
+        assert cleanup_args[2] == {"d1", "d2"}
+
 
 @pytest.mark.asyncio
 async def test_run_cluster_manager_no_clusters_formed():
-    """Devices found but build_clusters returns empty → skip write."""
+    """Devices found but build_clusters returns empty → clear keys, skip write."""
     call_count = 0
     _mock_db, mock_session = _make_mock_session()
 
@@ -662,7 +785,7 @@ async def test_run_cluster_manager_no_clusters_formed():
         patch(
             "app.tasks.cluster_manager.clear_cluster_keys",
             new_callable=AsyncMock,
-        ),
+        ) as mock_clear,
         patch(
             "app.tasks.cluster_manager.get_eligible_devices",
             new_callable=AsyncMock,
@@ -694,6 +817,7 @@ async def test_run_cluster_manager_no_clusters_formed():
         with pytest.raises(asyncio.CancelledError):
             await run_cluster_manager()
 
+        mock_clear.assert_called_once()
         mock_write.assert_not_called()
 
 
@@ -734,12 +858,14 @@ async def test_run_cluster_manager_db_error():
 
 
 @pytest.mark.asyncio
-async def test_run_cluster_manager_redis_error_during_clear():
-    """Redis error during clear_cluster_keys → logged, loop continues."""
+async def test_run_cluster_manager_redis_error_during_write():
+    """Redis error during write_clusters_to_redis → logged, loop continues."""
     call_count = 0
     _mock_db, mock_session = _make_mock_session()
 
     from redis.exceptions import RedisError
+
+    device = _make_device(_make_user())
 
     with (
         patch(
@@ -757,7 +883,27 @@ async def test_run_cluster_manager_redis_error_during_clear():
             },
         ),
         patch(
-            "app.tasks.cluster_manager.clear_cluster_keys",
+            "app.tasks.cluster_manager.get_eligible_devices",
+            new_callable=AsyncMock,
+            return_value=[device],
+        ),
+        patch(
+            "app.tasks.cluster_manager.build_clusters",
+            new_callable=AsyncMock,
+            return_value={"c1": [{"device_id": "d1", "lat": 40.0, "lon": -74.0}]},
+        ),
+        patch(
+            "app.tasks.cluster_manager.compute_member_statuses",
+            new_callable=AsyncMock,
+            return_value={"d1": "active"},
+        ),
+        patch(
+            "app.tasks.cluster_manager.get_search_interval_config",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.tasks.cluster_manager.write_clusters_to_redis",
             new_callable=AsyncMock,
             side_effect=RedisError("connection refused"),
         ),
@@ -855,7 +1001,10 @@ async def test_run_cluster_manager_interval_fallback():
                 "rebuild_interval_minutes": 5,
             },
         ),
-        patch("app.tasks.cluster_manager.clear_cluster_keys", new_callable=AsyncMock),
+        patch(
+            "app.tasks.cluster_manager.cleanup_stale_cluster_keys",
+            new_callable=AsyncMock,
+        ),
         patch(
             "app.tasks.cluster_manager.get_eligible_devices",
             new_callable=AsyncMock,
