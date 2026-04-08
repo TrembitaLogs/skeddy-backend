@@ -8,6 +8,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 
 from app.admin.auth import AdminAuth
 from app.admin.backup import BackupView
+from app.admin.cluster_map import ClusterMapView
 from app.admin.credit_balance import CreditBalanceAdmin
 from app.admin.credit_transaction import CreditTransactionAdmin
 from app.admin.dashboard import DashboardView
@@ -98,6 +99,7 @@ def setup_admin(app):
 
     # Register Dashboard and all ModelAdmin views
     admin.add_view(DashboardView)
+    admin.add_view(ClusterMapView)
     admin.add_view(ApiDocsView)
     admin.add_view(UserAdmin)
     admin.add_view(PairedDeviceAdmin)
