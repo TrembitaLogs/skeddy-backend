@@ -109,7 +109,7 @@ async def _finalize_purchase(
             )
 
             if claim.rowcount == 0:  # type: ignore[attr-defined]
-                raise IntegrityError("Optimistic lock failed", params=None, orig=None)
+                raise IntegrityError("Optimistic lock failed", params=None, orig=Exception())
     except IntegrityError:
         # Savepoint rolled back — verify actual order state
         refreshed = await db.execute(

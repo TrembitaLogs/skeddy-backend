@@ -67,8 +67,8 @@ async def test_register_stores_verification_code_in_redis(mock_send, app_client,
 
 
 @patch("app.routers.auth.send_verification_code", new_callable=AsyncMock)
-async def test_register_stores_code_with_24h_ttl(mock_send, app_client, fake_redis):
-    """Verification code is stored with 86400s (24h) TTL."""
+async def test_register_stores_code_with_30min_ttl(mock_send, app_client, fake_redis):
+    """Verification code is stored with 1800s (30 min) TTL."""
     response = await app_client.post(
         REGISTER_URL,
         json={"email": "ttl-verify@example.com", "password": _TEST_PASSWORD},
@@ -77,11 +77,11 @@ async def test_register_stores_code_with_24h_ttl(mock_send, app_client, fake_red
     assert response.status_code == 201
     user_id = response.json()["user_id"]
 
-    # Verify setex was called with correct TTL (86400 seconds)
+    # Verify setex was called with correct TTL (1800 seconds)
     setex_calls = fake_redis.setex.call_args_list
     code_setex = [c for c in setex_calls if f"verify_code:{user_id}" in str(c)]
     assert len(code_setex) == 1
-    assert code_setex[0][0][1] == 86400
+    assert code_setex[0][0][1] == 1800
 
 
 # --- Test Strategy: 3. Verify that email was sent with 6-digit code ---

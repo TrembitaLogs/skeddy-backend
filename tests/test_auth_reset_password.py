@@ -12,7 +12,7 @@ Test strategy from task 15:
 
 import hashlib
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from redis.exceptions import RedisError
 
@@ -137,24 +137,32 @@ async def test_reset_password_wrong_code_returns_401(app_client, fake_redis):
 
 
 async def test_reset_password_5_wrong_attempts_invalidates_code(app_client, fake_redis):
-    """After 5 wrong attempts, the code is invalidated."""
+    """After 5 wrong attempts, the code is invalidated.
+
+    Uses time mock to bypass exponential backoff between attempts.
+    """
     email = "maxattempts@example.com"
     await _register_user(app_client, email=email)
     await _store_reset_code_in_redis(fake_redis, email)
 
-    # Make 5 wrong attempts
-    for _i in range(5):
+    # Mock time.time to always return a value far in the future relative to
+    # last_failed_at, bypassing exponential backoff delays.
+    with patch("app.services.auth_service.time") as mock_time:
+        mock_time.time.return_value = 1e12
+
+        # Make 5 wrong attempts
+        for _i in range(5):
+            response = await app_client.post(
+                RESET_PASSWORD_URL,
+                json={"email": email, "code": "00000000", "new_password": _NEW_PASSWORD},
+            )
+            assert response.status_code == 401
+
+        # 6th attempt with correct code should also fail — code is gone
         response = await app_client.post(
             RESET_PASSWORD_URL,
-            json={"email": email, "code": "00000000", "new_password": _NEW_PASSWORD},
+            json={"email": email, "code": _RESET_CODE, "new_password": _NEW_PASSWORD},
         )
-        assert response.status_code == 401
-
-    # 6th attempt with correct code should also fail — code is gone
-    response = await app_client.post(
-        RESET_PASSWORD_URL,
-        json={"email": email, "code": _RESET_CODE, "new_password": _NEW_PASSWORD},
-    )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "INVALID_RESET_CODE"
 
