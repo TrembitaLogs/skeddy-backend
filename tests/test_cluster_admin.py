@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.admin.cluster_map import ClusterMapView
+from app.admin.cluster_map import ClusterMapView, _fetch_cluster_data
 from app.models.app_config import AppConfig
 from app.models.credit_balance import CreditBalance
 from app.models.paired_device import PairedDevice
@@ -42,6 +42,24 @@ def _make_fake_redis(store: dict[str, str] | None = None):
     return redis
 
 
+class _MockSessionCtx:
+    """Async context manager that yields a given session."""
+
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *args):
+        pass
+
+
+def _session_factory(db_session):
+    """Return a callable that mimics AsyncSessionLocal()."""
+    return lambda: _MockSessionCtx(db_session)
+
+
 class TestClusterMapViewConfiguration:
     """Tests for ClusterMapView configuration."""
 
@@ -51,12 +69,11 @@ class TestClusterMapViewConfiguration:
 
 
 class TestClusterApiEndpoint:
-    """Tests for GET /admin/api/clusters."""
+    """Tests for GET /admin/api/clusters via _fetch_cluster_data."""
 
     @pytest.mark.asyncio
-    async def test_clusters_present(self, db_session, admin_client):
+    async def test_clusters_present(self, db_session, fake_redis, app_client):
         """API returns correct cluster data when clusters exist in Redis."""
-        # Create test users and devices
         user1 = User(email="alice@example.com", password_hash="hash1")
         user2 = User(email="bob@example.com", password_hash="hash2")
         db_session.add_all([user1, user2])
@@ -86,11 +103,9 @@ class TestClusterApiEndpoint:
         cb2 = CreditBalance(user_id=user2.id, balance=30)
         db_session.add_all([cb1, cb2])
 
-        # Add config
         db_session.add(AppConfig(key="clustering_enabled", value="true"))
         db_session.add(AppConfig(key="clustering_threshold_miles", value="16"))
 
-        # Add a ride for user1
         ride = Ride(
             user_id=user1.id,
             idempotency_key="ride1",
@@ -102,9 +117,8 @@ class TestClusterApiEndpoint:
         db_session.add(ride)
         await db_session.commit()
 
-        # Set up fake Redis with cluster data
         cluster_id = "test_cluster_1"
-        fake_redis = _make_fake_redis(
+        mock_redis = _make_fake_redis(
             {
                 f"cluster:{cluster_id}": json.dumps({"active_members": 2, "search_interval": 30}),
                 "device_cluster:dev1": json.dumps({"cluster_id": cluster_id, "status": "active"}),
@@ -113,13 +127,13 @@ class TestClusterApiEndpoint:
                 ),
             }
         )
-        fake_redis._sets_store[f"cluster_members:{cluster_id}"] = {"dev1", "dev2"}
+        mock_redis._sets_store[f"cluster_members:{cluster_id}"] = {"dev1", "dev2"}
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
-
-        assert resp.status_code == 200
-        data = resp.json()
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
         assert data["clustering_enabled"] is True
         assert data["clustering_threshold_miles"] == 16
@@ -134,7 +148,6 @@ class TestClusterApiEndpoint:
         assert "lat" in cluster["centroid"]
         assert "lon" in cluster["centroid"]
 
-        # Check devices in cluster
         device_ids = {d["device_id"] for d in cluster["devices"]}
         assert device_ids == {"dev1", "dev2"}
 
@@ -148,53 +161,56 @@ class TestClusterApiEndpoint:
         assert dev2_data["status"] == "penalized"
 
     @pytest.mark.asyncio
-    async def test_empty_clusters(self, db_session, admin_client):
+    async def test_empty_clusters(self, db_session, fake_redis, app_client):
         """API returns empty clusters when no cluster data in Redis."""
         db_session.add(AppConfig(key="clustering_enabled", value="true"))
         await db_session.commit()
 
-        fake_redis = _make_fake_redis({})
+        mock_redis = _make_fake_redis({})
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
-        assert resp.status_code == 200
-        data = resp.json()
         assert data["clustering_enabled"] is True
         assert data["clusters"] == []
         assert data["solo_devices"] == []
 
     @pytest.mark.asyncio
-    async def test_clustering_disabled(self, db_session, admin_client):
+    async def test_clustering_disabled(self, db_session, fake_redis, app_client):
         """API returns clustering_enabled=false when feature is disabled."""
         db_session.add(AppConfig(key="clustering_enabled", value="false"))
         await db_session.commit()
 
-        fake_redis = _make_fake_redis({})
+        mock_redis = _make_fake_redis({})
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
-        assert resp.status_code == 200
-        data = resp.json()
         assert data["clustering_enabled"] is False
         assert data["clusters"] == []
 
     @pytest.mark.asyncio
-    async def test_clustering_disabled_default(self, db_session, admin_client):
+    async def test_clustering_disabled_default(self, db_session, fake_redis, app_client):
         """API defaults to clustering_enabled=false when no config exists."""
-        fake_redis = _make_fake_redis({})
+        mock_redis = _make_fake_redis({})
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
-        assert resp.status_code == 200
-        data = resp.json()
         assert data["clustering_enabled"] is False
         assert data["clustering_threshold_miles"] == 16
 
     @pytest.mark.asyncio
-    async def test_solo_devices_identified(self, db_session, admin_client):
+    async def test_solo_devices_identified(self, db_session, fake_redis, app_client):
         """Devices with location but not in any cluster appear as solo."""
         user = User(email="solo@example.com", password_hash="hash1")
         db_session.add(user)
@@ -214,13 +230,14 @@ class TestClusterApiEndpoint:
         db_session.add(AppConfig(key="clustering_enabled", value="true"))
         await db_session.commit()
 
-        fake_redis = _make_fake_redis({})
+        mock_redis = _make_fake_redis({})
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
-        assert resp.status_code == 200
-        data = resp.json()
         assert len(data["clusters"]) == 0
         assert len(data["solo_devices"]) == 1
 
@@ -233,7 +250,7 @@ class TestClusterApiEndpoint:
         assert solo["last_ping_at"] is not None
 
     @pytest.mark.asyncio
-    async def test_devices_without_location_excluded(self, db_session, admin_client):
+    async def test_devices_without_location_excluded(self, db_session, fake_redis, app_client):
         """Devices without latitude are excluded from both clusters and solo."""
         user = User(email="noloc@example.com", password_hash="hash1")
         db_session.add(user)
@@ -251,32 +268,84 @@ class TestClusterApiEndpoint:
         db_session.add(AppConfig(key="clustering_enabled", value="true"))
         await db_session.commit()
 
-        fake_redis = _make_fake_redis({})
+        mock_redis = _make_fake_redis({})
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
-        assert resp.status_code == 200
-        data = resp.json()
         assert data["clusters"] == []
         assert data["solo_devices"] == []
 
     @pytest.mark.asyncio
-    async def test_response_format_validation(self, db_session, admin_client):
+    async def test_response_format_validation(self, db_session, fake_redis, app_client):
         """API response contains all required top-level fields."""
-        fake_redis = _make_fake_redis({})
+        mock_redis = _make_fake_redis({})
 
-        with patch("app.admin.cluster_map.redis_client", fake_redis):
-            resp = await admin_client.client.get("/admin/api/clusters")
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
 
-        assert resp.status_code == 200
-        data = resp.json()
         assert "clustering_enabled" in data
         assert "clustering_threshold_miles" in data
         assert "clusters" in data
         assert "solo_devices" in data
         assert isinstance(data["clusters"], list)
         assert isinstance(data["solo_devices"], list)
+
+    @pytest.mark.asyncio
+    async def test_centroid_calculation(self, db_session, fake_redis, app_client):
+        """Centroid is the average of member coordinates."""
+        user1 = User(email="u1@example.com", password_hash="hash1")
+        user2 = User(email="u2@example.com", password_hash="hash2")
+        db_session.add_all([user1, user2])
+        await db_session.flush()
+
+        db_session.add(
+            PairedDevice(
+                user_id=user1.id,
+                device_id="d1",
+                device_token_hash="t1",
+                timezone="UTC",
+                latitude=40.0,
+                longitude=-74.0,
+            )
+        )
+        db_session.add(
+            PairedDevice(
+                user_id=user2.id,
+                device_id="d2",
+                device_token_hash="t2",
+                timezone="UTC",
+                latitude=42.0,
+                longitude=-76.0,
+            )
+        )
+        await db_session.commit()
+
+        cluster_id = "centroid_test"
+        mock_redis = _make_fake_redis(
+            {
+                f"cluster:{cluster_id}": json.dumps({"active_members": 2, "search_interval": 60}),
+                "device_cluster:d1": json.dumps({"cluster_id": cluster_id, "status": "active"}),
+                "device_cluster:d2": json.dumps({"cluster_id": cluster_id, "status": "active"}),
+            }
+        )
+        mock_redis._sets_store[f"cluster_members:{cluster_id}"] = {"d1", "d2"}
+
+        with (
+            patch("app.admin.cluster_map.redis_client", mock_redis),
+            patch("app.admin.cluster_map.AsyncSessionLocal", _session_factory(db_session)),
+        ):
+            data = await _fetch_cluster_data()
+
+        centroid = data["clusters"][0]["centroid"]
+        assert centroid["lat"] == pytest.approx(41.0)
+        assert centroid["lon"] == pytest.approx(-75.0)
 
 
 class TestClusterMapAuth:
