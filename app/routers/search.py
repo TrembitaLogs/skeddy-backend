@@ -54,9 +54,10 @@ async def stop_search(
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Stop search for the authenticated user. Idempotent."""
-    await set_search_active(db, current_user.id, active=False)
+    await set_search_active(db, current_user.id, active=False, redis=redis)
     return OkResponse()
 
 
@@ -103,7 +104,8 @@ async def device_override(
     body: DeviceOverrideRequest,
     device: PairedDevice = Depends(verify_device),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Override search active status from a paired Search device."""
-    await set_search_active(db, device.user_id, active=body.active)
+    await set_search_active(db, device.user_id, active=body.active, redis=redis)
     return OkResponse()

@@ -22,6 +22,10 @@ CACHE_KEY_RIDE_CREDIT_TIERS = "app_config:ride_credit_tiers"
 CACHE_KEY_REGISTRATION_BONUS = "app_config:registration_bonus"
 CACHE_KEY_PUSH_TEMPLATES = "app_config:push_templates"
 CACHE_KEY_EMAIL_TEMPLATES = "app_config:email_templates"
+CACHE_KEY_CLUSTERING_ENABLED = "app_config:clustering_enabled"
+CACHE_KEY_CLUSTERING_PENALTY = "app_config:clustering_penalty_minutes"
+CACHE_KEY_CLUSTERING_THRESHOLD = "app_config:clustering_threshold_miles"
+CACHE_KEY_CLUSTERING_REBUILD_INTERVAL = "app_config:clustering_rebuild_interval_minutes"
 CACHE_TTL = 300  # 5 minutes (Redis)
 IN_MEMORY_TTL = 600  # 10 minutes (fallback when Redis is unavailable)
 
@@ -42,6 +46,10 @@ _DB_KEY_TO_CACHE_KEYS: dict[str, list[str]] = {
     "ride_credit_tiers": [CACHE_KEY_RIDE_CREDIT_TIERS],
     "registration_bonus_credits": [CACHE_KEY_REGISTRATION_BONUS],
     "push_notification_templates": [CACHE_KEY_PUSH_TEMPLATES],
+    "clustering_enabled": [CACHE_KEY_CLUSTERING_ENABLED],
+    "clustering_penalty_minutes": [CACHE_KEY_CLUSTERING_PENALTY],
+    "clustering_threshold_miles": [CACHE_KEY_CLUSTERING_THRESHOLD],
+    "clustering_rebuild_interval_minutes": [CACHE_KEY_CLUSTERING_REBUILD_INTERVAL],
 }
 
 

@@ -1,0 +1,185 @@
+{% extends "sqladmin/layout.html" %}
+{% block content %}
+<div class="container-fluid">
+    <h2>Cluster Map</h2>
+
+    <div id="cluster-status" class="mb-2">
+        <span class="badge bg-secondary">Loading...</span>
+    </div>
+
+    <div id="cluster-map" style="width: 100%; height: 600px; border-radius: 8px; border: 1px solid #dee2e6;"></div>
+
+    <div class="mt-2 text-muted">
+        <small>
+            Auto-refresh: every 30 seconds |
+            <span style="color: #48bb78;">&#9679;</span> Active
+            <span style="color: #f6ad55;">&#9679;</span> Penalized
+            <span style="color: #a0aec0;">&#9679;</span> Solo
+        </small>
+    </div>
+</div>
+
+{% if maps_api_key %}
+<script>
+let map;
+let markers = [];
+let circles = [];
+let openInfoWindows = [];
+
+function initMap() {
+    map = new google.maps.Map(document.getElementById('cluster-map'), {
+        center: {lat: 39.8283, lng: -98.5795},
+        zoom: 4,
+        mapTypeControl: true,
+        streetViewControl: false,
+    });
+    loadClusters();
+    setInterval(loadClusters, 30000);
+}
+
+function clearMap() {
+    markers.forEach(function(m) { m.setMap(null); });
+    circles.forEach(function(c) { c.setMap(null); });
+    openInfoWindows.forEach(function(iw) { iw.close(); });
+    markers = [];
+    circles = [];
+    openInfoWindows = [];
+}
+
+function formatTime(iso) {
+    if (!iso) return 'N/A';
+    var d = new Date(iso);
+    return d.toLocaleString();
+}
+
+function loadClusters() {
+    fetch('/admin/api/clusters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            clearMap();
+
+            var statusEl = document.getElementById('cluster-status');
+            if (!data.clustering_enabled) {
+                statusEl.innerHTML = '<span class="badge bg-warning">Clustering disabled</span>';
+            } else {
+                var clusterCount = data.clusters.length;
+                var deviceCount = 0;
+                data.clusters.forEach(function(c) { deviceCount += c.total_members; });
+                statusEl.innerHTML =
+                    '<span class="badge bg-success">Clustering enabled</span> ' +
+                    '<span class="badge bg-info">' + clusterCount + ' cluster(s), ' +
+                    deviceCount + ' clustered device(s), ' +
+                    data.solo_devices.length + ' solo</span> ' +
+                    '<span class="badge bg-secondary">Threshold: ' +
+                    data.clustering_threshold_miles + ' mi</span>';
+            }
+
+            var thresholdMiles = data.clustering_threshold_miles;
+            var radiusMeters = (thresholdMiles / 2) * 1609.34;
+
+            data.clusters.forEach(function(cluster) {
+                var circle = new google.maps.Circle({
+                    strokeColor: '#4299e1',
+                    strokeOpacity: 0.6,
+                    strokeWeight: 2,
+                    fillColor: '#4299e1',
+                    fillOpacity: 0.1,
+                    map: map,
+                    center: {lat: cluster.centroid.lat, lng: cluster.centroid.lon},
+                    radius: radiusMeters,
+                });
+                circles.push(circle);
+
+                var labelContent =
+                    '<div style="font-size:12px;font-weight:bold;padding:4px;">' +
+                    cluster.active_members + '/' + cluster.total_members + ' active | ' +
+                    cluster.search_interval + 's interval</div>';
+                var clusterInfo = new google.maps.InfoWindow({
+                    content: labelContent,
+                    position: {lat: cluster.centroid.lat, lng: cluster.centroid.lon},
+                });
+                circle.addListener('click', function() {
+                    clusterInfo.open(map);
+                    openInfoWindows.push(clusterInfo);
+                });
+
+                cluster.devices.forEach(function(device) {
+                    var color = device.status === 'penalized' ? '#f6ad55' : '#48bb78';
+                    addDeviceMarker(device, color, true);
+                });
+            });
+
+            data.solo_devices.forEach(function(device) {
+                addDeviceMarker(device, '#a0aec0', false);
+            });
+        })
+        .catch(function(err) {
+            console.error('Failed to load clusters:', err);
+        });
+}
+
+function addDeviceMarker(device, color, inCluster) {
+    var marker = new google.maps.Marker({
+        position: {lat: device.latitude, lng: device.longitude},
+        map: map,
+        icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: color,
+            fillOpacity: 0.9,
+            strokeWeight: 2,
+            strokeColor: '#fff',
+        },
+        title: device.user_name,
+    });
+
+    var content = '<div style="font-size:13px;min-width:180px;">' +
+        '<strong>' + device.user_name + '</strong><br>' +
+        'Balance: ' + device.balance + '<br>' +
+        'Last ping: ' + formatTime(device.last_ping_at);
+
+    if (inCluster) {
+        content += '<br>Status: ' + device.status;
+        content += '<br>Last ride: ' + formatTime(device.last_ride_at);
+    }
+    content += '</div>';
+
+    var infoWindow = new google.maps.InfoWindow({content: content});
+    marker.addListener('click', function() {
+        infoWindow.open(map, marker);
+        openInfoWindows.push(infoWindow);
+    });
+
+    markers.push(marker);
+}
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ maps_api_key }}&callback=initMap"></script>
+{% else %}
+<div class="alert alert-warning mt-3">
+    Google Maps API key not configured. Set <code>GOOGLE_MAPS_API_KEY</code> environment variable
+    or add <code>google_maps_api_key</code> to App Config.
+</div>
+<script>
+(function() {
+    fetch('/admin/api/clusters')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var statusEl = document.getElementById('cluster-status');
+            if (!data.clustering_enabled) {
+                statusEl.innerHTML = '<span class="badge bg-warning">Clustering disabled</span>';
+            } else {
+                var clusterCount = data.clusters.length;
+                var deviceCount = 0;
+                data.clusters.forEach(function(c) { deviceCount += c.total_members; });
+                statusEl.innerHTML =
+                    '<span class="badge bg-success">Clustering enabled</span> ' +
+                    '<span class="badge bg-info">' + clusterCount + ' cluster(s), ' +
+                    deviceCount + ' clustered device(s), ' +
+                    data.solo_devices.length + ' solo</span>';
+            }
+        })
+        .catch(function() {});
+})();
+</script>
+{% endif %}
+{% endblock %}

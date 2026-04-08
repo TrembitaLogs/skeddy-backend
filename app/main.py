@@ -32,6 +32,7 @@ from app.routers.rides import router as rides_router
 from app.routers.search import router as search_router
 from app.services.fcm_service import initialize_firebase
 from app.tasks.balance_reconciliation import run_balance_reconciliation
+from app.tasks.cluster_manager import run_cluster_manager
 from app.tasks.data_cleanup import cleanup_old_data
 from app.tasks.health_check import check_device_health
 from app.tasks.low_balance_reminder import run_low_balance_reminder
@@ -65,6 +66,7 @@ async def lifespan(app: FastAPI):
     verification_task = asyncio.create_task(run_verification_fallback())
     purchase_recovery_task = asyncio.create_task(run_purchase_recovery())
     reconciliation_task = asyncio.create_task(run_balance_reconciliation())
+    cluster_task = asyncio.create_task(run_cluster_manager())
 
     yield
 
@@ -77,6 +79,7 @@ async def lifespan(app: FastAPI):
         verification_task,
         purchase_recovery_task,
         reconciliation_task,
+        cluster_task,
     ):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

@@ -87,6 +87,7 @@ async def create_ride_endpoint(
             ride_hash=body.ride_hash,
             price=body.ride_data.price,
             verification_deadline=verification_deadline,
+            device_id=device.device_id,
         )
     except IntegrityError:
         await db.rollback()

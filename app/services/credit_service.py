@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.credit_balance import CreditBalance
 from app.models.credit_transaction import CreditTransaction, TransactionType
+from app.models.paired_device import PairedDevice
+from app.services.cluster_service import remove_device_from_cluster
 from app.services.config_service import (
     get_registration_bonus_credits,
     get_ride_credit_tiers,
@@ -146,6 +148,21 @@ async def charge_credits(
     )
 
     await db.flush()
+
+    if new_balance <= 0:
+        try:
+            device_result = await db.execute(
+                select(PairedDevice.device_id).where(PairedDevice.user_id == user_id)
+            )
+            device_id = device_result.scalar_one_or_none()
+            if device_id:
+                await remove_device_from_cluster(device_id, redis)
+        except Exception:
+            logger.warning(
+                "Failed to remove device from cluster after balance depletion for user %s",
+                user_id,
+                exc_info=True,
+            )
 
     return (charged_amount, new_balance)
 

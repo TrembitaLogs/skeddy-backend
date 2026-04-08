@@ -14,11 +14,13 @@ from app.config import settings
 from app.models.app_config import AppConfig
 from app.services.config_service.cache import (
     CACHE_KEY,
+    CACHE_KEY_CLUSTERING_ENABLED,
     CACHE_KEY_INTERVAL,
     CACHE_KEY_VERIFICATION_CHECK_INTERVAL,
     CACHE_TTL,
     _memory_cache,
 )
+from app.services.config_service.clustering import DEFAULT_CLUSTERING_ENABLED
 from app.services.config_service.verification import (
     DEFAULT_VERIFICATION_CHECK_INTERVAL_MINUTES,
 )
@@ -33,6 +35,7 @@ class PingConfigs:
     min_search_version: str
     verification_check_interval_minutes: int
     search_interval_config: tuple[int, list[float]] | None
+    clustering_enabled: bool
 
 
 # DB keys that map to each Redis cache entry.
@@ -40,6 +43,7 @@ _DB_KEY_MIN_VERSION = "min_search_app_version"
 _DB_KEY_CHECK_INTERVAL = "verification_check_interval_minutes"
 _DB_KEY_RPD = "requests_per_day"
 _DB_KEY_RPH = "requests_per_hour"
+_DB_KEY_CLUSTERING_ENABLED = "clustering_enabled"
 
 
 async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
@@ -50,10 +54,15 @@ async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
 
     Reduces Redis round-trips from 3 separate GETs to 1 MGET.
     """
-    redis_keys = [CACHE_KEY, CACHE_KEY_VERIFICATION_CHECK_INTERVAL, CACHE_KEY_INTERVAL]
+    redis_keys = [
+        CACHE_KEY,
+        CACHE_KEY_VERIFICATION_CHECK_INTERVAL,
+        CACHE_KEY_INTERVAL,
+        CACHE_KEY_CLUSTERING_ENABLED,
+    ]
 
     # 1. Try Redis MGET
-    cached: list[str | None] = [None, None, None]
+    cached: list[str | None] = [None, None, None, None]
     redis_failed = False
     try:
         cached = await redis.mget(redis_keys)
@@ -65,6 +74,7 @@ async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
     min_version: str | None = None
     check_interval: int | None = None
     interval_config: tuple[int, list[float]] | None = None
+    clustering_enabled: bool | None = None
     # Track whether interval was resolved (None is a valid "not configured" state)
     interval_resolved = False
 
@@ -88,6 +98,10 @@ async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
         except (json.JSONDecodeError, KeyError, TypeError):
             logger.warning("Invalid cached search_interval: %r", cached[2])
 
+    if cached[3] is not None:
+        clustering_enabled = str(cached[3]).lower() in ("true", "1", "yes")
+        _memory_cache[CACHE_KEY_CLUSTERING_ENABLED] = clustering_enabled
+
     # 2b. In-memory fallback for values still missing after Redis failure
     if redis_failed:
         if min_version is None:
@@ -103,6 +117,10 @@ async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
             if mem is not None:
                 interval_config = mem
                 interval_resolved = True
+        if clustering_enabled is None:
+            mem = _memory_cache.get(CACHE_KEY_CLUSTERING_ENABLED)
+            if mem is not None:
+                clustering_enabled = mem
 
     # 3. Determine which DB keys are needed
     need_db_keys: list[str] = []
@@ -112,6 +130,8 @@ async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
         need_db_keys.append(_DB_KEY_CHECK_INTERVAL)
     if not interval_resolved:
         need_db_keys.extend([_DB_KEY_RPD, _DB_KEY_RPH])
+    if clustering_enabled is None:
+        need_db_keys.append(_DB_KEY_CLUSTERING_ENABLED)
 
     # 4. Single DB query for all missing keys
     if need_db_keys:
@@ -162,15 +182,31 @@ async def batch_get_ping_configs(db: AsyncSession, redis: Redis) -> PingConfigs:
                 except (ValueError, TypeError, json.JSONDecodeError):
                     logger.warning("Invalid DB interval config")
 
+        # Parse and cache clustering_enabled
+        if clustering_enabled is None:
+            db_val = db_rows.get(_DB_KEY_CLUSTERING_ENABLED)
+            if db_val is not None:
+                clustering_enabled = db_val.lower() in ("true", "1", "yes")
+                _memory_cache[CACHE_KEY_CLUSTERING_ENABLED] = clustering_enabled
+                with contextlib.suppress(RedisError):
+                    await redis.setex(
+                        CACHE_KEY_CLUSTERING_ENABLED,
+                        CACHE_TTL,
+                        str(clustering_enabled).lower(),
+                    )
+
     # 5. Apply defaults for anything still missing
     if min_version is None:
         min_version = settings.MIN_SEARCH_APP_VERSION
     if check_interval is None:
         check_interval = DEFAULT_VERIFICATION_CHECK_INTERVAL_MINUTES
+    if clustering_enabled is None:
+        clustering_enabled = DEFAULT_CLUSTERING_ENABLED
     # interval_config stays None when not configured (caller uses flat default)
 
     return PingConfigs(
         min_search_version=min_version,
         verification_check_interval_minutes=check_interval,
         search_interval_config=interval_config,
+        clustering_enabled=clustering_enabled,
     )
