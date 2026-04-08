@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.models.ride import VerificationStatus
+
 
 class RideData(BaseModel):
     """Ride data payload sent by search device (stored as JSONB)."""
@@ -67,7 +69,7 @@ class RideEventResponse(BaseModel):
     ride_data: dict
     credits_charged: int = 0
     credits_refunded: int = 0
-    verification_status: str = "PENDING"
+    verification_status: str = VerificationStatus.PENDING
     created_at: datetime
 
 

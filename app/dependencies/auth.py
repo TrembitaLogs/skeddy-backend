@@ -4,14 +4,13 @@ from uuid import UUID
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
-from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.dependencies.redis import require_redis
 from app.middleware.request_id import user_id_ctx
 from app.models.user import User
-from app.redis import get_redis
 from app.services.auth_service import decode_access_token, is_token_blacklisted
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ security = HTTPBearer()
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
+    redis: Redis = Depends(require_redis),
 ) -> User:
     """Extract and validate JWT from Authorization header, return the authenticated User."""
     payload = decode_access_token(credentials.credentials)
@@ -33,15 +32,10 @@ async def get_current_user(
     if not user_id:
         raise HTTPException(status_code=401, detail="INVALID_TOKEN_PAYLOAD")
 
-    # Check token blacklist (fail-closed: reject if Redis is unavailable)
+    # Check token blacklist (fail-closed via require_redis dependency)
     jti = payload.get("jti")
-    if jti:
-        try:
-            if await is_token_blacklisted(redis, jti):
-                raise HTTPException(status_code=401, detail="TOKEN_REVOKED")
-        except RedisError:
-            logger.error("Redis unavailable during token blacklist check — denying access")
-            raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+    if jti and await is_token_blacklisted(redis, jti):
+        raise HTTPException(status_code=401, detail="TOKEN_REVOKED")
 
     result = await db.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
