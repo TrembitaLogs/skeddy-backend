@@ -13,7 +13,9 @@ from app.database import AsyncSessionLocal
 from app.models.paired_device import PairedDevice
 from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
+from app.redis import redis_client
 from app.schemas.fcm import NotificationType, create_search_offline_payload
+from app.services.cluster_service import remove_device_from_cluster
 from app.services.fcm_service import send_push
 from app.services.filter_service import get_user_filters
 from app.services.ping_service import is_within_schedule
@@ -153,6 +155,16 @@ async def check_device_health() -> None:
                             if sent:
                                 device.offline_notified = True
                                 await db.commit()
+                                try:
+                                    await remove_device_from_cluster(
+                                        device.device_id, redis_client
+                                    )
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to remove device %s from cluster after offline",
+                                        device.device_id,
+                                        exc_info=True,
+                                    )
                                 logger.info(
                                     "Device %s offline notification sent (user=%s)",
                                     device.device_id,
@@ -167,6 +179,14 @@ async def check_device_health() -> None:
                         else:
                             device.offline_notified = True
                             await db.commit()
+                            try:
+                                await remove_device_from_cluster(device.device_id, redis_client)
+                            except Exception:
+                                logger.warning(
+                                    "Failed to remove device %s from cluster after offline",
+                                    device.device_id,
+                                    exc_info=True,
+                                )
                             logger.info(
                                 "Device %s offline, no FCM token (user=%s), flagged",
                                 device.device_id,
