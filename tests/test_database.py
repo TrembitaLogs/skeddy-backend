@@ -26,7 +26,8 @@ class TestAsyncSessionLocal:
     async def test_expire_on_commit_disabled(self):
         """Sessions have expire_on_commit=False for post-commit attribute access."""
         async with AsyncSessionLocal() as session:
-            assert session.expire_on_commit is False
+            sync_session = session.sync_session
+            assert sync_session.expire_on_commit is False
 
     @pytest.mark.asyncio
     async def test_session_is_bound_to_engine(self):
