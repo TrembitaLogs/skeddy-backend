@@ -29,6 +29,7 @@ from app.services.credit_service import add_credits, cache_balance, get_balance
 from app.services.google_play_service import (
     GooglePlayService,
     GooglePlayVerificationError,
+    GooglePurchaseResult,
 )
 from app.services.legacy_credit_service import RestoreStatus, try_restore_legacy_credits
 
@@ -84,31 +85,33 @@ async def _finalize_purchase(
 ) -> PurchaseResponse:
     """Atomic CONSUMED -> VERIFIED transition with credit application.
 
-    Prevents double crediting via optimistic locking: only the process that
-    successfully transitions CONSUMED -> VERIFIED proceeds to add credits.
-    If another process already finalized this order, returns idempotent
-    success with HTTP 200.
+    Uses a savepoint (begin_nested) so a failed optimistic-lock attempt
+    only rolls back this operation, consistent with the savepoint policy
+    used in ping_service.py for concurrent state transitions.
     """
-    # Capture before any commit/rollback may expire ORM attributes
+    # Capture before any savepoint rollback may expire ORM attributes
     order_id = order.id
     order_credits = order.credits_amount
     order_product_id = order.product_id
 
-    claim = await db.execute(
-        update(PurchaseOrder)
-        .where(
-            PurchaseOrder.id == order_id,
-            PurchaseOrder.status == PurchaseStatus.CONSUMED.value,
-        )
-        .values(
-            status=PurchaseStatus.VERIFIED.value,
-            verified_at=func.now(),
-        )
-    )
+    try:
+        async with db.begin_nested():
+            claim = await db.execute(
+                update(PurchaseOrder)
+                .where(
+                    PurchaseOrder.id == order_id,
+                    PurchaseOrder.status == PurchaseStatus.CONSUMED.value,
+                )
+                .values(
+                    status=PurchaseStatus.VERIFIED.value,
+                    verified_at=func.now(),
+                )
+            )
 
-    if claim.rowcount == 0:  # type: ignore[attr-defined]
-        # Another process may have finalized — verify actual order state
-        await db.rollback()
+            if claim.rowcount == 0:  # type: ignore[attr-defined]
+                raise IntegrityError("Optimistic lock failed", params=None, orig=None)
+    except IntegrityError:
+        # Savepoint rolled back — verify actual order state
         refreshed = await db.execute(
             select(PurchaseOrder.status).where(PurchaseOrder.id == order_id)
         )
@@ -148,6 +151,159 @@ async def _finalize_purchase(
     return PurchaseResponse(credits_added=order_credits, new_balance=new_balance)
 
 
+async def _resolve_or_create_order(
+    purchase_token: str,
+    product_id: str,
+    credits_amount: int,
+    user_id: UUID,
+    db: AsyncSession,
+    redis: Redis,
+    response: Response,
+) -> PurchaseOrder | PurchaseResponse:
+    """Lookup existing order by purchase_token or create a new PENDING one.
+
+    Returns a PurchaseResponse early for VERIFIED (idempotent replay) or
+    CONSUMED (recovery) orders. Otherwise returns the PurchaseOrder for
+    fresh verification.
+    """
+    result = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.purchase_token == purchase_token)
+    )
+    order = result.scalar_one_or_none()
+
+    if order is not None:
+        if order.status == PurchaseStatus.VERIFIED.value:
+            current_balance = await get_balance(user_id, db, redis)
+            response.status_code = 200
+            return PurchaseResponse(
+                credits_added=order.credits_amount,
+                new_balance=current_balance,
+            )
+        if order.status == PurchaseStatus.CONSUMED.value:
+            return await _finalize_purchase(order, user_id, db, redis, response)
+        order.credits_amount = credits_amount
+        order.product_id = product_id
+        return order
+
+    order = PurchaseOrder(
+        user_id=user_id,
+        product_id=product_id,
+        purchase_token=purchase_token,
+        credits_amount=credits_amount,
+        status=PurchaseStatus.PENDING.value,
+    )
+    db.add(order)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.info(
+            "Purchase token race condition: user_id=%s, token=%s",
+            user_id,
+            purchase_token[:16],
+        )
+        result = await db.execute(
+            select(PurchaseOrder).where(PurchaseOrder.purchase_token == purchase_token)
+        )
+        order = result.scalar_one_or_none()
+        if order is None:
+            raise
+        if order.status == PurchaseStatus.VERIFIED.value:
+            current_balance = await get_balance(user_id, db, redis)
+            response.status_code = 200
+            return PurchaseResponse(
+                credits_added=order.credits_amount,
+                new_balance=current_balance,
+            )
+        if order.status == PurchaseStatus.CONSUMED.value:
+            return await _finalize_purchase(order, user_id, db, redis, response)
+    return order
+
+
+async def _verify_with_google_play(
+    order: PurchaseOrder,
+    product_id: str,
+    purchase_token: str,
+    user_id: UUID,
+    db: AsyncSession,
+    gp_service: GooglePlayService,
+) -> GooglePurchaseResult:
+    """Verify purchase token with Google Play. Marks order FAILED on error."""
+    try:
+        return await gp_service.verify_purchase(product_id, purchase_token)
+    except GooglePlayVerificationError:
+        order.status = PurchaseStatus.FAILED.value
+        await db.commit()
+        raise HTTPException(status_code=400, detail="INVALID_PURCHASE_TOKEN")
+    except (OSError, TimeoutError, ValueError, HttpError) as exc:
+        logger.error(
+            "Google Play verify failed: user_id=%s, product_id=%s: %s",
+            user_id,
+            product_id,
+            exc,
+            exc_info=True,
+        )
+        order.status = PurchaseStatus.FAILED.value
+        await db.commit()
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+
+
+async def _consume_and_persist(
+    order: PurchaseOrder,
+    gp_result: "GooglePurchaseResult",
+    product_id: str,
+    purchase_token: str,
+    user_id: UUID,
+    db: AsyncSession,
+    redis: Redis,
+    response: Response,
+    gp_service: GooglePlayService,
+) -> PurchaseResponse:
+    """Handle Google consume flow: already_consumed recovery, consume API, persist CONSUMED, finalize."""
+    # Already consumed by Google (crash recovery path)
+    if gp_result.already_consumed:
+        order.status = PurchaseStatus.CONSUMED.value
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            logger.info("google_order_id race (already_consumed): order_id=%s", gp_result.order_id)
+            return await _handle_order_id_conflict(
+                gp_result.order_id, user_id, db, redis, response
+            )
+        return await _finalize_purchase(order, user_id, db, redis, response)
+
+    # Consume purchase via Google Play API
+    try:
+        consumed = await gp_service.consume_purchase(product_id, purchase_token)
+    except (OSError, TimeoutError, HttpError) as exc:
+        logger.error(
+            "Google Play consume failed: user_id=%s, product_id=%s: %s",
+            user_id,
+            product_id,
+            exc,
+            exc_info=True,
+        )
+        order.status = PurchaseStatus.FAILED.value
+        await db.commit()
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+    if not consumed:
+        order.status = PurchaseStatus.FAILED.value
+        await db.commit()
+        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+
+    # Persist CONSUMED status
+    order.status = PurchaseStatus.CONSUMED.value
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.info("google_order_id race (consume): order_id=%s", gp_result.order_id)
+        return await _handle_order_id_conflict(gp_result.order_id, user_id, db, redis, response)
+
+    return await _finalize_purchase(order, user_id, db, redis, response)
+
+
 @router.post("/purchase", response_model=PurchaseResponse, status_code=201)
 @limiter.limit("10/minute", key_func=get_user_key)
 async def purchase_credits(
@@ -173,90 +329,32 @@ async def purchase_credits(
     if product.credits <= 0:
         logger.error("Product %s has non-positive credits: %d", body.product_id, product.credits)
         raise HTTPException(status_code=400, detail="INVALID_PRODUCT_CONFIG")
-    credits_amount = product.credits
 
-    # 2. Lookup existing PurchaseOrder by purchase_token (idempotency)
-    result = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.purchase_token == body.purchase_token)
+    # 2. Resolve existing order or create a new PENDING one
+    order_or_response = await _resolve_or_create_order(
+        body.purchase_token,
+        body.product_id,
+        product.credits,
+        current_user.id,
+        db,
+        redis,
+        response,
     )
-    order = result.scalar_one_or_none()
-
-    if order is not None:
-        # 2a. VERIFIED — idempotent replay (credits already applied)
-        if order.status == PurchaseStatus.VERIFIED.value:
-            current_balance = await get_balance(current_user.id, db, redis)
-            response.status_code = 200
-            return PurchaseResponse(
-                credits_added=order.credits_amount,
-                new_balance=current_balance,
-            )
-
-        # 2b. CONSUMED — recovery (consume done, credits not yet applied)
-        if order.status == PurchaseStatus.CONSUMED.value:
-            return await _finalize_purchase(order, current_user.id, db, redis, response)
-
-        # 2c. FAILED or PENDING — reuse record for fresh verification attempt
-        order.credits_amount = credits_amount
-        order.product_id = body.product_id
-    else:
-        # 2d. Not found — create new PurchaseOrder(PENDING)
-        order = PurchaseOrder(
-            user_id=current_user.id,
-            product_id=body.product_id,
-            purchase_token=body.purchase_token,
-            credits_amount=credits_amount,
-            status=PurchaseStatus.PENDING.value,
-        )
-        db.add(order)
-        try:
-            await db.commit()
-        except IntegrityError:
-            # Race: concurrent request already inserted this purchase_token
-            await db.rollback()
-            logger.info(
-                "Purchase token race condition: user_id=%s, token=%s",
-                current_user.id,
-                body.purchase_token[:16],
-            )
-            result = await db.execute(
-                select(PurchaseOrder).where(PurchaseOrder.purchase_token == body.purchase_token)
-            )
-            order = result.scalar_one_or_none()
-            if order is None:
-                raise
-            if order.status == PurchaseStatus.VERIFIED.value:
-                current_balance = await get_balance(current_user.id, db, redis)
-                response.status_code = 200
-                return PurchaseResponse(
-                    credits_added=order.credits_amount,
-                    new_balance=current_balance,
-                )
-            if order.status == PurchaseStatus.CONSUMED.value:
-                return await _finalize_purchase(order, current_user.id, db, redis, response)
-            # PENDING or FAILED — reuse existing order for verification
+    if isinstance(order_or_response, PurchaseResponse):
+        return order_or_response
+    order = order_or_response
 
     # 3. Verify with Google Play Developer API
-    try:
-        gp_result = await gp_service.verify_purchase(body.product_id, body.purchase_token)
-    except GooglePlayVerificationError:
-        order.status = PurchaseStatus.FAILED.value
-        await db.commit()
-        raise HTTPException(status_code=400, detail="INVALID_PURCHASE_TOKEN")
-    except (OSError, TimeoutError, ValueError, HttpError) as exc:
-        logger.error(
-            "Google Play verify failed: user_id=%s, product_id=%s: %s",
-            current_user.id,
-            body.product_id,
-            exc,
-            exc_info=True,
-        )
-        order.status = PurchaseStatus.FAILED.value
-        await db.commit()
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
+    gp_result = await _verify_with_google_play(
+        order,
+        body.product_id,
+        body.purchase_token,
+        current_user.id,
+        db,
+        gp_service,
+    )
 
-    # 4. Check google_order_id deduplication BEFORE recording it on the order.
-    #    Prevents double-crediting when two different purchase_tokens resolve
-    #    to the same Google order (UNIQUE constraint is the second line of defense).
+    # 4. Check google_order_id deduplication
     if gp_result.order_id:
         dup_result = await db.execute(
             select(PurchaseOrder).where(
@@ -273,62 +371,20 @@ async def purchase_credits(
                 credits_added=dup_order.credits_amount,
                 new_balance=current_balance,
             )
-
-    # 4b. Record google_order_id (safe — dedup check passed)
     order.google_order_id = gp_result.order_id
 
-    # 5. Handle already_consumed from Google (crash recovery: our consume()
-    #    succeeded in Google but status=CONSUMED was never persisted in our DB)
-    if gp_result.already_consumed:
-        order.status = PurchaseStatus.CONSUMED.value
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            logger.info(
-                "google_order_id race (already_consumed): order_id=%s",
-                gp_result.order_id,
-            )
-            return await _handle_order_id_conflict(
-                gp_result.order_id, current_user.id, db, redis, response
-            )
-        return await _finalize_purchase(order, current_user.id, db, redis, response)
-
-    # 6. Consume purchase (allows repurchase of same SKU)
-    try:
-        consumed = await gp_service.consume_purchase(body.product_id, body.purchase_token)
-    except (OSError, TimeoutError, HttpError) as exc:
-        logger.error(
-            "Google Play consume failed: user_id=%s, product_id=%s: %s",
-            current_user.id,
-            body.product_id,
-            exc,
-            exc_info=True,
-        )
-        order.status = PurchaseStatus.FAILED.value
-        await db.commit()
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
-    if not consumed:
-        order.status = PurchaseStatus.FAILED.value
-        await db.commit()
-        raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
-
-    # 7. Persist CONSUMED status (records the irreversible consume action)
-    order.status = PurchaseStatus.CONSUMED.value
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        logger.info(
-            "google_order_id race (consume): order_id=%s",
-            gp_result.order_id,
-        )
-        return await _handle_order_id_conflict(
-            gp_result.order_id, current_user.id, db, redis, response
-        )
-
-    # 8. Finalize: atomic CONSUMED -> VERIFIED + credit balance + transaction
-    return await _finalize_purchase(order, current_user.id, db, redis, response)
+    # 5-8. Consume, persist, and finalize
+    return await _consume_and_persist(
+        order,
+        gp_result,
+        body.product_id,
+        body.purchase_token,
+        current_user.id,
+        db,
+        redis,
+        response,
+        gp_service,
+    )
 
 
 @router.post("/restore", response_model=RestoreCreditsResponse)

@@ -58,6 +58,16 @@ class ResilientLimiter(Limiter):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._fallback_counts: dict[str, list[float]] = {}
+        self._fallback_activations: int = 0
+        self._fallback_rejections: int = 0
+
+    @property
+    def fallback_stats(self) -> dict[str, int]:
+        """Return fallback activation and rejection counters for monitoring."""
+        return {
+            "activations": self._fallback_activations,
+            "rejections": self._fallback_rejections,
+        }
 
     def _check_request_limit(
         self,
@@ -70,9 +80,15 @@ class ResilientLimiter(Limiter):
             super()._check_request_limit(request, endpoint_func, in_middleware)
         except RateLimitExceeded:
             raise
-        except (RedisError, OSError):
+        except (RedisError, OSError) as exc:
             use_fallback = True
-            logger.warning("Rate limit storage unavailable, using in-memory fallback")
+            self._fallback_activations += 1
+            logger.warning(
+                "rate_limiter_fallback_active: Redis unavailable, "
+                "using in-memory fallback (activation_count=%d, error=%s)",
+                self._fallback_activations,
+                exc,
+            )
         finally:
             # Ensure view_rate_limit is always set. The attribute is normally
             # assigned inside __evaluate_limits, but when the storage raises an
@@ -102,6 +118,13 @@ class ResilientLimiter(Limiter):
         timestamps = [t for t in timestamps if t > cutoff]
 
         if len(timestamps) >= _FALLBACK_MAX_REQUESTS:
+            self._fallback_rejections += 1
+            logger.warning(
+                "rate_limiter_fallback_rejected: key=%s, rejection_count=%d, window=%ds",
+                key,
+                self._fallback_rejections,
+                _FALLBACK_WINDOW_SECONDS,
+            )
             raise _FallbackRateLimitError
 
         timestamps.append(now)

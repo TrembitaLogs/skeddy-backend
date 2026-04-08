@@ -2,6 +2,7 @@ import logging
 from uuid import UUID
 
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,7 +78,7 @@ async def set_search_active(
             device_id = device_result.scalar_one_or_none()
             if device_id:
                 await remove_device_from_cluster(device_id, redis)
-        except Exception:
+        except (RedisError, OSError):
             logger.warning(
                 "Failed to remove device from cluster after search deactivation for user %s",
                 user_id,
