@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,10 +33,16 @@ async def get_current_user(
     if not user_id:
         raise HTTPException(status_code=401, detail="INVALID_TOKEN_PAYLOAD")
 
-    # Check token blacklist (fail-closed via require_redis dependency)
+    # Check token blacklist (fail-closed: require_redis validates upfront,
+    # but also catch mid-request Redis failures for resilience)
     jti = payload.get("jti")
-    if jti and await is_token_blacklisted(redis, jti):
-        raise HTTPException(status_code=401, detail="TOKEN_REVOKED")
+    if jti:
+        try:
+            if await is_token_blacklisted(redis, jti):
+                raise HTTPException(status_code=401, detail="TOKEN_REVOKED")
+        except RedisError:
+            logger.error("Redis unavailable during token blacklist check — denying access")
+            raise HTTPException(status_code=503, detail="SERVICE_UNAVAILABLE")
 
     result = await db.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
