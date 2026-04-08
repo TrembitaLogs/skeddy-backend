@@ -28,6 +28,7 @@ dependencies = [
     "google-api-python-client>=2.190.0",
     "google-auth>=2.48.0",
     "cachetools>=7.0.1",
+    "h3>=4.2.1",
 ]
 
 [dependency-groups]
