@@ -373,6 +373,8 @@ async def get_unified_events(
         "effective_cutoff": effective_cutoff,
         "branch_limit": fetch_limit,
         "fetch_limit": fetch_limit,
+        "exclude_type_1": "RIDE_CHARGE",
+        "exclude_type_2": "RIDE_REFUND",
     }
 
     cursor_clause_ride = ""
@@ -427,7 +429,7 @@ async def get_unified_events(
                 description
             FROM credit_transactions
             WHERE user_id = :user_id
-              AND type NOT IN ('RIDE_CHARGE', 'RIDE_REFUND')
+              AND type NOT IN (:exclude_type_1, :exclude_type_2)
               AND created_at > :effective_cutoff
               {cursor_clause_credit}
             ORDER BY created_at DESC, id DESC
