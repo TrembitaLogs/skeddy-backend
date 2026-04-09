@@ -144,45 +144,51 @@ async def store_reset_code(redis: Redis, email: str, code: str) -> None:
     )
 
 
-async def verify_reset_code(redis: Redis, email: str, code: str) -> bool:
-    """Verify a 6-digit password reset code against the stored hash.
+async def _verify_code(
+    redis: Redis, key: str, code: str, *, max_attempts: int, error_detail: str
+) -> bool:
+    """Verify a 6-digit code against the stored hash.
 
+    Shared logic for both password-reset and email-verification flows.
     Increments the attempt counter on each wrong guess.  After
-    ``_RESET_CODE_MAX_ATTEMPTS`` wrong attempts the code is invalidated.
+    ``max_attempts`` wrong attempts the code is invalidated.
 
     Returns ``True`` when the code is valid.
-
-    Raises ``HTTPException(401)`` with ``INVALID_RESET_CODE`` when:
-    - no code exists for this email (expired or never requested)
-    - the code is wrong
-    - the attempt limit has been reached
+    Raises ``HTTPException(401)`` with the given ``error_detail`` on failure.
     """
-    key = f"{_RESET_CODE_PREFIX}{email}"
     raw = await redis.get(key)
     if raw is None:
-        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
+        raise HTTPException(status_code=401, detail=error_detail)
 
     data = json.loads(raw)
 
-    # Check attempt limit first
-    if data["attempts"] >= settings.RESET_CODE_MAX_ATTEMPTS:
+    if data["attempts"] >= max_attempts:
         await redis.delete(key)
-        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
+        raise HTTPException(status_code=401, detail=error_detail)
 
     code_hash = hashlib.sha256(code.encode()).hexdigest()
 
     if not secrets.compare_digest(code_hash, data["code_hash"]):
-        # Increment attempts, preserve remaining TTL
         data["attempts"] += 1
         ttl = await redis.ttl(key)
         if ttl > 0:
             await redis.setex(key, ttl, json.dumps(data))
         else:
-            # Key is about to expire anyway - just delete
             await redis.delete(key)
-        raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
+        raise HTTPException(status_code=401, detail=error_detail)
 
     return True
+
+
+async def verify_reset_code(redis: Redis, email: str, code: str) -> bool:
+    """Verify a 6-digit password reset code against the stored hash."""
+    return await _verify_code(
+        redis,
+        f"{_RESET_CODE_PREFIX}{email}",
+        code,
+        max_attempts=settings.RESET_CODE_MAX_ATTEMPTS,
+        error_detail="INVALID_RESET_CODE",
+    )
 
 
 async def delete_reset_code(redis: Redis, email: str) -> None:
@@ -213,44 +219,14 @@ async def store_verify_code(
 
 
 async def verify_verify_code(redis: Redis, user_id: str, code: str) -> bool:
-    """Verify a 6-digit email verification code against the stored hash.
-
-    Increments the attempt counter on each wrong guess.  After
-    ``_VERIFY_CODE_MAX_ATTEMPTS`` wrong attempts the code is invalidated.
-
-    Returns ``True`` when the code is valid.
-
-    Raises ``HTTPException(401)`` with ``INVALID_VERIFICATION_CODE`` when:
-    - no code exists for this user (expired or never requested)
-    - the code is wrong
-    - the attempt limit has been reached
-    """
-    key = f"{_VERIFY_CODE_PREFIX}{user_id}"
-    raw = await redis.get(key)
-    if raw is None:
-        raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
-
-    data = json.loads(raw)
-
-    # Check attempt limit first
-    if data["attempts"] >= settings.VERIFY_CODE_MAX_ATTEMPTS:
-        await redis.delete(key)
-        raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
-
-    code_hash = hashlib.sha256(code.encode()).hexdigest()
-
-    if not secrets.compare_digest(code_hash, data["code_hash"]):
-        # Increment attempts, preserve remaining TTL
-        data["attempts"] += 1
-        ttl = await redis.ttl(key)
-        if ttl > 0:
-            await redis.setex(key, ttl, json.dumps(data))
-        else:
-            # Key is about to expire anyway - just delete
-            await redis.delete(key)
-        raise HTTPException(status_code=401, detail="INVALID_VERIFICATION_CODE")
-
-    return True
+    """Verify a 6-digit email verification code against the stored hash."""
+    return await _verify_code(
+        redis,
+        f"{_VERIFY_CODE_PREFIX}{user_id}",
+        code,
+        max_attempts=settings.VERIFY_CODE_MAX_ATTEMPTS,
+        error_detail="INVALID_VERIFICATION_CODE",
+    )
 
 
 async def delete_verify_code(redis: Redis, user_id: str) -> None:
