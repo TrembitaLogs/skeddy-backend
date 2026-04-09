@@ -384,3 +384,41 @@ class TestCreditBalanceAdminRegistration:
         """Credit Balance list view URL responds (requires auth redirect)."""
         resp = await app_client.get("/admin/credit-balance/list")
         assert resp.status_code in (200, 302, 303)
+
+
+# ---------------------------------------------------------------------------
+# Test 11-12: Column formatters and sortable columns
+# ---------------------------------------------------------------------------
+
+
+class TestColumnFormatters:
+    """Tests for column display formatters."""
+
+    def test_updated_at_formatter_with_value(self):
+        """updated_at formatter formats datetime correctly."""
+        from datetime import datetime
+
+        formatter = CreditBalanceAdmin.column_formatters[CreditBalance.updated_at]
+        cb = CreditBalance()
+        cb.updated_at = datetime(2026, 1, 15, 10, 30, 0)
+        result = formatter(cb, "updated_at")
+        assert result == "2026-01-15 10:30:00"
+
+    def test_updated_at_formatter_with_none(self):
+        """updated_at formatter returns empty string for None."""
+        formatter = CreditBalanceAdmin.column_formatters[CreditBalance.updated_at]
+        cb = CreditBalance()
+        cb.updated_at = None
+        result = formatter(cb, "updated_at")
+        assert result == ""
+
+    def test_sortable_columns_include_balance_and_updated_at(self):
+        """Sortable columns include balance and updated_at."""
+        sortable_keys = set()
+        for col in CreditBalanceAdmin.column_sortable_list:
+            if isinstance(col, str):
+                sortable_keys.add(col)
+            else:
+                sortable_keys.add(col.key)
+        assert "balance" in sortable_keys
+        assert "updated_at" in sortable_keys
