@@ -76,9 +76,9 @@ class TestPushTemplateAfterModelChange:
         view = object.__new__(PushTemplateAdmin)
 
         with (
-            patch("app.admin.push_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.push_template.invalidate_push_templates",
+                "app.services.config_service.invalidate_push_templates",
                 new_callable=AsyncMock,
             ) as mock_invalidate,
         ):
@@ -95,9 +95,9 @@ class TestPushTemplateAfterModelChange:
         view = object.__new__(PushTemplateAdmin)
 
         with (
-            patch("app.admin.push_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.push_template.invalidate_push_templates",
+                "app.services.config_service.invalidate_push_templates",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("Unexpected error"),
             ),
@@ -115,9 +115,9 @@ class TestPushTemplateAfterModelChange:
         view = object.__new__(PushTemplateAdmin)
 
         with (
-            patch("app.admin.push_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.push_template.invalidate_push_templates",
+                "app.services.config_service.invalidate_push_templates",
                 new_callable=AsyncMock,
             ),
             patch("app.admin.push_template.audit_logger") as mock_audit,

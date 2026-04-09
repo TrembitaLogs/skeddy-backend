@@ -78,9 +78,9 @@ class TestEmailTemplateAfterModelChange:
         view = object.__new__(EmailTemplateAdmin)
 
         with (
-            patch("app.admin.email_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.email_template.invalidate_email_templates",
+                "app.services.config_service.invalidate_email_templates",
                 new_callable=AsyncMock,
             ) as mock_invalidate,
         ):
@@ -97,9 +97,9 @@ class TestEmailTemplateAfterModelChange:
         view = object.__new__(EmailTemplateAdmin)
 
         with (
-            patch("app.admin.email_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.email_template.invalidate_email_templates",
+                "app.services.config_service.invalidate_email_templates",
                 new_callable=AsyncMock,
                 side_effect=RedisError("Connection refused"),
             ),
@@ -117,9 +117,9 @@ class TestEmailTemplateAfterModelChange:
         view = object.__new__(EmailTemplateAdmin)
 
         with (
-            patch("app.admin.email_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.email_template.invalidate_email_templates",
+                "app.services.config_service.invalidate_email_templates",
                 new_callable=AsyncMock,
                 side_effect=OSError("Network unreachable"),
             ),
@@ -137,9 +137,9 @@ class TestEmailTemplateAfterModelChange:
         view = object.__new__(EmailTemplateAdmin)
 
         with (
-            patch("app.admin.email_template.redis_client", mock_redis),
+            patch("app.redis.redis_client", mock_redis),
             patch(
-                "app.admin.email_template.invalidate_email_templates",
+                "app.services.config_service.invalidate_email_templates",
                 new_callable=AsyncMock,
             ),
             patch("app.admin.email_template.audit_logger") as mock_audit,
