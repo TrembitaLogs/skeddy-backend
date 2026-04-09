@@ -109,8 +109,19 @@ async def _finalize_purchase(
     )
 
     if claim.rowcount == 0:  # type: ignore[attr-defined]
-        # Another process already finalized — return idempotent success
+        # Another process may have finalized — verify actual order state
         await db.rollback()
+        refreshed = await db.execute(
+            select(PurchaseOrder.status).where(PurchaseOrder.id == order_id)
+        )
+        actual_status = refreshed.scalar_one_or_none()
+        if actual_status != PurchaseStatus.VERIFIED.value:
+            logger.error(
+                "Finalize race: order %s expected VERIFIED but found %s",
+                order_id,
+                actual_status,
+            )
+            raise HTTPException(status_code=409, detail="ORDER_STATE_CONFLICT")
         current_balance = await get_balance(user_id, db, redis)
         response.status_code = 200
         return PurchaseResponse(

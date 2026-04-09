@@ -85,6 +85,9 @@ async def lifespan(app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
+    # Close Redis connection pool to prevent connection leaks
+    await redis_client.aclose()
+
 
 app = FastAPI(
     title="Skeddy API",
