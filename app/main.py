@@ -18,7 +18,7 @@ from app.middleware.csrf import CSRFMiddleware
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.language_sync import sync_language_dependency
 from app.middleware.logging import setup_logging
-from app.middleware.rate_limiter import setup_rate_limiter
+from app.middleware.rate_limiter import limiter, setup_rate_limiter
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.redis import redis_client
@@ -165,6 +165,7 @@ async def health_check(detail_key: str = Query("", alias="detail")):
             "status": status,
             "postgres": "ok" if postgres_ok else "unavailable",
             "redis": "ok" if redis_ok else "unavailable",
+            "rate_limiter_fallback": limiter.fallback_stats,
         }
     return {"status": status}
 
