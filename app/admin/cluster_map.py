@@ -184,7 +184,7 @@ class ClusterMapView(BaseView):
         )
 
     @expose("/api/clusters", methods=["GET"])
-    async def api_clusters(self, request):
+    async def data_clusters_api(self, request):
         """Return cluster data as JSON for map visualization."""
         try:
             data = await _fetch_cluster_data()

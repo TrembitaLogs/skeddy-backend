@@ -369,3 +369,19 @@ class TestClusterMapAuth:
         resp = await admin_client.client.get("/admin/cluster-map")
         assert resp.status_code == 200
         assert "Cluster Map" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_sidebar_links_to_html_not_json(self, admin_client):
+        """Sidebar link leads to /admin/cluster-map (HTML), not /admin/api/clusters (JSON)."""
+        resp = await admin_client.client.get("/admin/", follow_redirects=True)
+        assert resp.status_code == 200
+        # The sidebar should contain a link to the HTML cluster map page
+        assert "/admin/cluster-map" in resp.text
+        # The sidebar should NOT link directly to the JSON API endpoint
+        body = resp.text
+        # Find sidebar nav links — the href for Cluster Map must be the HTML page
+        import re
+
+        sidebar_links = re.findall(r'href="([^"]*cluster[^"]*)"', body)
+        for link in sidebar_links:
+            assert "/api/clusters" not in link, f"Sidebar links to JSON API: {link}"
