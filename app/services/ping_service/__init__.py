@@ -5,6 +5,7 @@ Re-exports all public symbols for backward compatibility.
 
 from app.services.ping_service.device import update_device_state
 from app.services.ping_service.schedule import (
+    MIN_INTERVAL_SECONDS,
     calculate_dynamic_interval,
     check_app_version,
     is_within_schedule,
@@ -28,6 +29,7 @@ from app.services.ping_service.verification import (
 __all__ = [
     "BATCH_DEDUP_TTL",
     "BATCH_KEY_PREFIX",
+    "MIN_INTERVAL_SECONDS",
     "build_verify_rides",
     "calculate_dynamic_interval",
     "check_app_version",
