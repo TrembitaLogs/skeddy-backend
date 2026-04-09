@@ -12,7 +12,7 @@ Test strategy from task 19:
 
 import hashlib
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from redis.exceptions import RedisError
 
@@ -149,25 +149,40 @@ async def test_verify_email_wrong_code_returns_401(app_client, fake_redis):
 
 
 async def test_verify_email_5_wrong_attempts_invalidates_code(app_client, fake_redis):
-    """After 5 wrong attempts, the verification code is invalidated."""
+    """After 5 wrong attempts, the verification code is invalidated.
+
+    Uses time mock to bypass exponential backoff between attempts.
+    """
     data, headers = await _register_and_get_auth(app_client, email="maxattempts@example.com")
     await _store_verify_code_in_redis(fake_redis, data["user_id"])
 
-    # Make 5 wrong attempts
-    for _i in range(5):
+    # Mock time.time to advance by 1000s on each call, ensuring the
+    # exponential backoff window (max 60s) is always satisfied.
+    call_count = 0
+
+    def advancing_time():
+        nonlocal call_count
+        call_count += 1
+        return call_count * 1000.0
+
+    with patch("app.services.auth_service.time") as mock_time:
+        mock_time.time.side_effect = advancing_time
+
+        # Make 5 wrong attempts
+        for _i in range(5):
+            response = await app_client.post(
+                VERIFY_EMAIL_URL,
+                json={"code": "00000000"},
+                headers=headers,
+            )
+            assert response.status_code == 401
+
+        # 6th attempt with correct code should also fail — code is gone
         response = await app_client.post(
             VERIFY_EMAIL_URL,
-            json={"code": "00000000"},
+            json={"code": _VERIFY_CODE},
             headers=headers,
         )
-        assert response.status_code == 401
-
-    # 6th attempt with correct code should also fail — code is gone
-    response = await app_client.post(
-        VERIFY_EMAIL_URL,
-        json={"code": _VERIFY_CODE},
-        headers=headers,
-    )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "INVALID_VERIFICATION_CODE"
 

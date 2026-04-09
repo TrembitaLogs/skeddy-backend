@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from redis.exceptions import RedisError
 
 from app.models.credit_balance import CreditBalance
 from app.models.paired_device import PairedDevice
@@ -151,7 +152,7 @@ class TestSearchDeactivationRemovesFromCluster:
         with patch(
             "app.services.search_service.remove_device_from_cluster",
             new_callable=AsyncMock,
-            side_effect=Exception("Redis down"),
+            side_effect=RedisError("Redis down"),
         ):
             # Should not raise
             await set_search_active(db_session, user.id, active=False, redis=fake_redis)
