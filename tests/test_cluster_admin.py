@@ -1,7 +1,7 @@
 """Tests for the cluster admin map view and API endpoint."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -86,7 +86,7 @@ class TestClusterApiEndpoint:
             timezone="UTC",
             latitude=40.71,
             longitude=-74.01,
-            last_ping_at=datetime.utcnow(),
+            last_ping_at=datetime.now(UTC),
         )
         device2 = PairedDevice(
             user_id=user2.id,
@@ -95,7 +95,7 @@ class TestClusterApiEndpoint:
             timezone="UTC",
             latitude=40.72,
             longitude=-74.02,
-            last_ping_at=datetime.utcnow(),
+            last_ping_at=datetime.now(UTC),
         )
         db_session.add_all([device1, device2])
 
@@ -112,7 +112,7 @@ class TestClusterApiEndpoint:
             event_type="ACCEPTED",
             ride_data={"price": 10},
             ride_hash="a" * 64,
-            created_at=datetime.utcnow() - timedelta(hours=1),
+            created_at=datetime.now(UTC) - timedelta(hours=1),
         )
         db_session.add(ride)
         await db_session.commit()
@@ -223,7 +223,7 @@ class TestClusterApiEndpoint:
             timezone="UTC",
             latitude=41.88,
             longitude=-87.63,
-            last_ping_at=datetime.utcnow(),
+            last_ping_at=datetime.now(UTC),
         )
         db_session.add(device)
         db_session.add(CreditBalance(user_id=user.id, balance=25))

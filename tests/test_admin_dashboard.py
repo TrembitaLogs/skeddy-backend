@@ -50,14 +50,14 @@ class TestDashboardViewStatistics:
             device_id="device1",
             device_token_hash="token1",
             timezone="UTC",
-            last_ping_at=datetime.utcnow(),  # Active (pinged recently)
+            last_ping_at=datetime.now(UTC),  # Active (pinged recently)
         )
         device2 = PairedDevice(
             user_id=user2.id,
             device_id="device2",
             device_token_hash="token2",
             timezone="UTC",
-            last_ping_at=datetime.utcnow() - timedelta(minutes=60),  # Inactive
+            last_ping_at=datetime.now(UTC) - timedelta(minutes=60),  # Inactive
         )
         db_session.add(device1)
         db_session.add(device2)
@@ -75,7 +75,7 @@ class TestDashboardViewStatistics:
             event_type="requested",
             ride_data={"price": 10.0},
             ride_hash="a" * 64,
-            created_at=datetime.utcnow() - timedelta(hours=1),  # Last 24h
+            created_at=datetime.now(UTC) - timedelta(hours=1),  # Last 24h
         )
         ride_old = Ride(
             user_id=user2.id,
@@ -83,7 +83,7 @@ class TestDashboardViewStatistics:
             event_type="requested",
             ride_data={"price": 15.0},
             ride_hash="b" * 64,
-            created_at=datetime.utcnow() - timedelta(days=5),  # Last 7d
+            created_at=datetime.now(UTC) - timedelta(days=5),  # Last 7d
         )
         db_session.add(ride_recent)
         db_session.add(ride_old)
@@ -93,7 +93,7 @@ class TestDashboardViewStatistics:
         users_count = await db_session.scalar(select(func.count(User.id)))
         assert users_count == 2
 
-        threshold = datetime.utcnow() - timedelta(minutes=30)
+        threshold = datetime.now(UTC) - timedelta(minutes=30)
         active_devices = await db_session.scalar(
             select(func.count(PairedDevice.id)).where(PairedDevice.last_ping_at >= threshold)
         )
@@ -109,13 +109,13 @@ class TestDashboardViewStatistics:
         )
         assert active_searches == 1
 
-        day_ago = datetime.utcnow() - timedelta(hours=24)
+        day_ago = datetime.now(UTC) - timedelta(hours=24)
         rides_24h = await db_session.scalar(
             select(func.count(Ride.id)).where(Ride.created_at >= day_ago)
         )
         assert rides_24h == 1  # Only ride_recent
 
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_ago = datetime.now(UTC) - timedelta(days=7)
         rides_7d = await db_session.scalar(
             select(func.count(Ride.id)).where(Ride.created_at >= week_ago)
         )
