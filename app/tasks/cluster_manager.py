@@ -311,10 +311,11 @@ async def run_cluster_manager() -> None:
 
                     if interval_config is not None and active_count > 0:
                         rpd, rph = interval_config
-                        base_interval = calculate_dynamic_interval(rpd, rph, 12)
-                        search_interval = base_interval * active_count
+                        current_hour = datetime.now(UTC).hour
+                        base_interval = calculate_dynamic_interval(rpd, rph, current_hour)
+                        search_interval = base_interval
                     else:
-                        search_interval = 60 * max(active_count, 1)
+                        search_interval = 60
 
                     cluster_params[cluster_id] = {
                         "active_members": active_count,
