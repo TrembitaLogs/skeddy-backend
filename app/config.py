@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     # Auth code TTLs and attempt limits
     RESET_CODE_TTL: int = 900  # 15 minutes
     RESET_CODE_MAX_ATTEMPTS: int = 5
-    VERIFY_CODE_TTL: int = 86400  # 24 hours
+    VERIFY_CODE_TTL: int = 1800  # 30 minutes
     VERIFY_CODE_MAX_ATTEMPTS: int = 5
 
     # Rate limiter fallback (in-memory, when Redis is down)
@@ -128,6 +128,13 @@ class Settings(BaseSettings):
             )
         if not self.CORS_ORIGINS:
             raise ValueError("CORS_ORIGINS must be set in production/staging environments")
+        non_https = [
+            o.strip()
+            for o in self.CORS_ORIGINS.split(",")
+            if o.strip() and not o.strip().startswith("https://")
+        ]
+        if non_https:
+            raise ValueError(f"All CORS_ORIGINS must use HTTPS in production/staging: {non_https}")
         if not self.SENTRY_DSN:
             _logger.warning("SENTRY_DSN is not set — error tracking is disabled")
         return self

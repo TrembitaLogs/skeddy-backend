@@ -393,7 +393,7 @@ async def delete_account(
 
 
 @router.post("/request-reset", response_model=OkResponse)
-@limiter.limit("3/minute")
+@limiter.limit("1/minute")
 async def request_reset(
     request: Request,
     response: Response,

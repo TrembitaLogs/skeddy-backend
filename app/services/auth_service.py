@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import secrets
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -166,10 +167,18 @@ async def _verify_code(
         await redis.delete(key)
         raise HTTPException(status_code=401, detail=error_detail)
 
+    # Exponential backoff: enforce progressive delay between failed attempts
+    if data["attempts"] > 0:
+        last_failed = data.get("last_failed_at", 0)
+        backoff_seconds = min(2 ** (data["attempts"] - 1), 60)
+        if time.time() - last_failed < backoff_seconds:
+            raise HTTPException(status_code=429, detail="TOO_MANY_ATTEMPTS")
+
     code_hash = hashlib.sha256(code.encode()).hexdigest()
 
     if not secrets.compare_digest(code_hash, data["code_hash"]):
         data["attempts"] += 1
+        data["last_failed_at"] = time.time()
         ttl = await redis.ttl(key)
         if ttl > 0:
             await redis.setex(key, ttl, json.dumps(data))
@@ -199,7 +208,7 @@ async def delete_reset_code(redis: Redis, email: str) -> None:
 async def store_verify_code(
     redis: Redis, user_id: str, code: str, *, new_email: str | None = None
 ) -> None:
-    """Store an email verification code hash in Redis with 24-hour TTL.
+    """Store an email verification code hash in Redis with 30-minute TTL.
 
     Any previous unused code for the same user is implicitly overwritten
     because the key ``verify_code:{user_id}`` is the same.
