@@ -10,7 +10,6 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.credit_transaction import TransactionType
 from app.models.ride import Ride
 from app.models.user import User
 from app.schemas.fcm import NotificationType, create_ride_accepted_payload
