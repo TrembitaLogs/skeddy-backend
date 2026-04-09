@@ -228,6 +228,7 @@ async def test_set_search_active_toggle_back(db_session):
 async def test_set_search_active_commit_failure_propagates():
     """DB commit failure in set_search_active propagates as-is."""
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
 
     # Simulate execute returning no existing row
     mock_result = MagicMock()
@@ -248,6 +249,7 @@ async def test_set_search_active_commit_failure_propagates():
 async def test_set_search_active_commit_integrity_error_propagates():
     """IntegrityError during commit (e.g. race condition) propagates."""
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None

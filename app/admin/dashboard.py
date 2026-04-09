@@ -1,6 +1,6 @@
 """Dashboard view with statistics for admin panel."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqladmin import BaseView, expose
 from sqlalchemy import and_, cast, func, select
@@ -36,7 +36,7 @@ class DashboardView(BaseView):
             users_count = await session.scalar(select(func.count(User.id)))
 
             # Active paired devices (pinged in last 30 minutes)
-            threshold = datetime.utcnow() - timedelta(minutes=30)
+            threshold = datetime.now(UTC) - timedelta(minutes=30)
             active_devices = await session.scalar(
                 select(func.count(PairedDevice.id)).where(PairedDevice.last_ping_at >= threshold)
             )
@@ -52,13 +52,13 @@ class DashboardView(BaseView):
             )
 
             # Rides in last 24 hours
-            day_ago = datetime.utcnow() - timedelta(hours=24)
+            day_ago = datetime.now(UTC) - timedelta(hours=24)
             rides_24h = await session.scalar(
                 select(func.count(Ride.id)).where(Ride.created_at >= day_ago)
             )
 
             # Rides in last 7 days
-            week_ago = datetime.utcnow() - timedelta(days=7)
+            week_ago = datetime.now(UTC) - timedelta(days=7)
             rides_7d = await session.scalar(
                 select(func.count(Ride.id)).where(Ride.created_at >= week_ago)
             )

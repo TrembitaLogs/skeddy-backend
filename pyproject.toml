@@ -50,6 +50,12 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "--cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=70"
+filterwarnings = [
+    # slowapi uses deprecated asyncio.iscoroutinefunction (third-party, not fixable here)
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:slowapi",
+    # asyncpg connection cleanup during test teardown
+    "ignore:coroutine 'Connection._cancel' was never awaited:RuntimeWarning",
+]
 
 # ── Ruff ──────────────────────────────────────────────────────────────
 [tool.ruff]
