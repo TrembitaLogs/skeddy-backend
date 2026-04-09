@@ -748,9 +748,9 @@ async def test_run_cluster_manager_full_cycle():
         call_args = mock_write.call_args[0]
         assert call_args[0] == cluster_result  # clusters
         assert call_args[1] == {"d1": "active", "d2": "active"}  # statuses
-        # cluster_params: active_members=2, search_interval=15*2=30
+        # cluster_params: active_members=2, search_interval=15 (base only, no N multiplication)
         assert call_args[2]["cluster-abc"]["active_members"] == 2
-        assert call_args[2]["cluster-abc"]["search_interval"] == 30
+        assert call_args[2]["cluster-abc"]["search_interval"] == 15
 
         # Verify stale cleanup was called with correct cluster/device ids
         mock_cleanup.assert_called_once()
@@ -973,7 +973,7 @@ async def test_run_cluster_manager_sleep_interval():
 
 @pytest.mark.asyncio
 async def test_run_cluster_manager_interval_fallback():
-    """No interval config → fallback interval = 60 * active_members."""
+    """No interval config → fallback interval = 60 (constant)."""
     call_count = 0
     _mock_db, mock_session = _make_mock_session()
 
@@ -1048,6 +1048,6 @@ async def test_run_cluster_manager_interval_fallback():
 
         mock_write.assert_called_once()
         params = mock_write.call_args[0][2]
-        # Fallback: 60 * 1 active member = 60
+        # Fallback: constant 60
         assert params["cluster-x"]["search_interval"] == 60
         assert params["cluster-x"]["active_members"] == 1
