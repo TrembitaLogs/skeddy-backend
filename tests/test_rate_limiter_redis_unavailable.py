@@ -154,9 +154,7 @@ async def test_storage_failure_is_logged(failopen_app, caplog):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             await client.post("/auth/login")
 
-    assert any(
-        "rate limit storage unavailable" in record.message.lower() for record in caplog.records
-    )
+    assert any("rate_limiter_fallback_active" in record.message for record in caplog.records)
 
 
 # ─── Test 5: After recovery, rate limiting works again ───
