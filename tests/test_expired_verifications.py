@@ -350,7 +350,7 @@ async def test_refund_error_rollback_keeps_pending(db_session, fake_redis):
 
     lock_error = OperationalError("could not obtain lock on row", params=None, orig=Exception())
     with patch(
-        "app.services.ping_service.refund_credits_in_txn",
+        "app.services.ping_service.verification.refund_credits_in_txn",
         side_effect=lock_error,
     ):
         result = await process_expired_verifications(db_session, user_id, fake_redis)
