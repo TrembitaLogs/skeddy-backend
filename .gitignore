@@ -39,10 +39,14 @@ htmlcov/
 # OS specific
 .DS_Store
 
+# Local scripts
+scripts/update-local.sh
+
 # Claude Code / TaskMaster
 .claude/
 .taskmaster/
 .mcp.json
+CLAUDE.md
 
 # Firebase credentials
 firebase-credentials.json
