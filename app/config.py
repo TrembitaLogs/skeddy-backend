@@ -122,8 +122,10 @@ class Settings(BaseSettings):
         _logger = logging.getLogger(__name__)
         if not self.ADMIN_PASSWORD:
             _logger.warning("ADMIN_PASSWORD is not set — admin panel login is disabled")
-        if not self.ADMIN_SECRET_KEY:
-            raise ValueError("ADMIN_SECRET_KEY must be set in production/staging environments")
+        if not self.ADMIN_SECRET_KEY or len(self.ADMIN_SECRET_KEY) < 32:
+            raise ValueError(
+                "ADMIN_SECRET_KEY must be set and at least 32 characters in production/staging"
+            )
         if not self.CORS_ORIGINS:
             raise ValueError("CORS_ORIGINS must be set in production/staging environments")
         if not self.SENTRY_DSN:

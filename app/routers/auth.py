@@ -440,6 +440,7 @@ async def reset_password(
         raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
 
     user.password_hash = hash_password(body.new_password)
+    await db.commit()
 
     # Invalidate all refresh tokens (force re-login on all devices)
     await delete_user_refresh_tokens(db, user.id)
