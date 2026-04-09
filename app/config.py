@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""  # bcrypt hash of admin password
     ADMIN_SECRET_KEY: str = ""
+    ADMIN_ALLOWED_IPS: str = (
+        ""  # comma-separated IPs, e.g. "10.0.0.1,192.168.1.0/24"; empty = no restriction
+    )
 
     # Backup
     BACKUP_DIR: str = "/backups"

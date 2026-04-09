@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
@@ -134,7 +134,7 @@ setup_rate_limiter(app)
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(detail_key: str = Query("", alias="detail")):
     postgres_ok = False
     redis_ok = False
 
@@ -153,11 +153,17 @@ async def health_check():
 
     status = "ok" if postgres_ok and redis_ok else "degraded"
 
-    return {
-        "status": status,
-        "postgres": "ok" if postgres_ok else "unavailable",
-        "redis": "ok" if redis_ok else "unavailable",
-    }
+    # Expose component-level details only when a valid detail key is provided
+    show_details = bool(
+        settings.ADMIN_SECRET_KEY and detail_key and detail_key == settings.ADMIN_SECRET_KEY
+    )
+    if show_details:
+        return {
+            "status": status,
+            "postgres": "ok" if postgres_ok else "unavailable",
+            "redis": "ok" if redis_ok else "unavailable",
+        }
+    return {"status": status}
 
 
 v1_router = APIRouter(dependencies=[Depends(sync_language_dependency)])
