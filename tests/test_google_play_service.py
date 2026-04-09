@@ -369,6 +369,29 @@ class TestVerifyPurchaseHttpError404:
 
 
 # ---------------------------------------------------------------------------
+# Test 12b: Non-404 HttpError is re-raised as-is
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyPurchaseHttpErrorNon404:
+    """verify_purchase re-raises non-404 HttpError without wrapping."""
+
+    async def test_http_500_reraises(self):
+        mock_api = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status = 500
+        http_error = HttpError(resp=mock_resp, content=b"Internal server error")
+        mock_api.purchases().products().get.return_value.execute.side_effect = http_error
+
+        svc = _create_service(mock_api)
+
+        with pytest.raises(HttpError) as exc_info:
+            await svc.verify_purchase("credits_10", "token-abc")
+
+        assert exc_info.value is http_error
+
+
+# ---------------------------------------------------------------------------
 # Test 13: verify_purchase delegates to run_in_executor
 # ---------------------------------------------------------------------------
 
