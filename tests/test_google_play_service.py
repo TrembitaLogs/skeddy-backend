@@ -493,14 +493,14 @@ class TestConsumePurchaseHttpError400:
 
 
 # ---------------------------------------------------------------------------
-# Test 17: HttpError 503 returns False (no retry, caller handles)
+# Test 17: HttpError 503 re-raises (server error, caller decides retry)
 # ---------------------------------------------------------------------------
 
 
 class TestConsumePurchaseHttpError503:
-    """consume_purchase returns False on HTTP 503 (service unavailable)."""
+    """consume_purchase re-raises HttpError on 5xx so the caller can retry."""
 
-    async def test_http_503_returns_false(self):
+    async def test_http_503_raises(self):
         mock_api = MagicMock()
         mock_resp = MagicMock()
         mock_resp.status = 503
@@ -508,9 +508,8 @@ class TestConsumePurchaseHttpError503:
         mock_api.purchases().products().consume.return_value.execute.side_effect = http_error
 
         svc = _create_service(mock_api)
-        result = await svc.consume_purchase("credits_10", "token-abc")
-
-        assert result is False
+        with pytest.raises(HttpError):
+            await svc.consume_purchase("credits_10", "token-abc")
 
 
 # ---------------------------------------------------------------------------
@@ -537,8 +536,8 @@ class TestConsumePurchaseLogging:
     async def test_logs_error_on_failure(self):
         mock_api = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.status = 503
-        http_error = HttpError(resp=mock_resp, content=b"Service unavailable")
+        mock_resp.status = 400
+        http_error = HttpError(resp=mock_resp, content=b"Bad request")
         mock_api.purchases().products().consume.return_value.execute.side_effect = http_error
 
         svc = _create_service(mock_api)

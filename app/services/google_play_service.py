@@ -158,12 +158,17 @@ class GooglePlayService:
         try:
             await loop.run_in_executor(None, request.execute)
         except HttpError as e:
+            status_code = e.resp.status
             logger.error(
                 "Google Play consume failed: product_id=%s, status=%s, error=%s",
                 product_id,
-                e.resp.status,
+                status_code,
                 str(e),
             )
+            if status_code >= 500:
+                # Server-side error — let the caller retry
+                raise
+            # Client error (4xx) — retrying won't help
             return False
 
         logger.info(

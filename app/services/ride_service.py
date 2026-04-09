@@ -391,6 +391,10 @@ async def get_unified_events(
             "AND (created_at, 'credit', id) < (:cursor_ts, :cursor_kind, :cursor_id)"
         )
 
+    # Raw SQL is intentional: SQLAlchemy ORM cannot express per-branch ORDER BY +
+    # LIMIT inside a CTE UNION ALL, dynamic cursor clauses, and cross-table NULL
+    # casts cleanly. Keeping it as raw text is more readable and performs better
+    # than a multi-step ORM workaround.
     sql = text(f"""
         WITH ride_events AS (
             SELECT

@@ -4,12 +4,34 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 HEALTH_URL = "/health"
+DETAIL_KEY = "test-admin-secret"
+HEALTH_DETAIL_URL = f"/health?detail={DETAIL_KEY}"
+
+
+@pytest.fixture(autouse=True)
+def _admin_secret(monkeypatch):
+    """Ensure ADMIN_SECRET_KEY is set for detail tests."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ADMIN_SECRET_KEY", DETAIL_KEY)
 
 
 @pytest.mark.asyncio
-async def test_health_returns_200_with_json_structure(app_client):
-    """GET /health returns 200 with status, postgres, redis fields."""
+async def test_health_returns_status_only_without_detail_key(app_client):
+    """GET /health without detail key returns only status field."""
     response = await app_client.get(HEALTH_URL)
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
+    assert data["status"] in ("ok", "degraded")
+    assert "postgres" not in data
+    assert "redis" not in data
+
+
+@pytest.mark.asyncio
+async def test_health_returns_full_json_with_detail_key(app_client):
+    """GET /health?detail=<key> returns status, postgres, redis fields."""
+    response = await app_client.get(HEALTH_DETAIL_URL)
     assert response.status_code == 200
     data = response.json()
     assert "status" in data
@@ -18,6 +40,17 @@ async def test_health_returns_200_with_json_structure(app_client):
     assert data["status"] in ("ok", "degraded")
     assert data["postgres"] in ("ok", "unavailable")
     assert data["redis"] in ("ok", "unavailable")
+
+
+@pytest.mark.asyncio
+async def test_health_rejects_wrong_detail_key(app_client):
+    """GET /health?detail=wrong returns only status, no component details."""
+    response = await app_client.get("/health?detail=wrong-key")
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
+    assert "postgres" not in data
+    assert "redis" not in data
 
 
 @pytest.mark.asyncio
@@ -36,7 +69,7 @@ async def test_health_postgres_ok_when_db_available(app_client):
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
     with patch("app.main.AsyncSessionLocal", return_value=mock_session):
-        response = await app_client.get(HEALTH_URL)
+        response = await app_client.get(HEALTH_DETAIL_URL)
 
     assert response.status_code == 200
     data = response.json()
@@ -52,7 +85,7 @@ async def test_health_postgres_unavailable_when_db_down(app_client):
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
     with patch("app.main.AsyncSessionLocal", return_value=mock_session):
-        response = await app_client.get(HEALTH_URL)
+        response = await app_client.get(HEALTH_DETAIL_URL)
 
     assert response.status_code == 200
     data = response.json()
@@ -67,7 +100,7 @@ async def test_health_redis_ok_when_available(app_client):
     mock_redis.ping = AsyncMock(return_value=True)
 
     with patch("app.main.redis_client", mock_redis):
-        response = await app_client.get(HEALTH_URL)
+        response = await app_client.get(HEALTH_DETAIL_URL)
 
     assert response.status_code == 200
     data = response.json()
@@ -81,7 +114,7 @@ async def test_health_redis_unavailable_when_down(app_client):
     mock_redis.ping = AsyncMock(side_effect=ConnectionError("connection refused"))
 
     with patch("app.main.redis_client", mock_redis):
-        response = await app_client.get(HEALTH_URL)
+        response = await app_client.get(HEALTH_DETAIL_URL)
 
     assert response.status_code == 200
     data = response.json()
@@ -104,7 +137,7 @@ async def test_health_status_ok_when_all_services_available(app_client):
         patch("app.main.AsyncSessionLocal", return_value=mock_session),
         patch("app.main.redis_client", mock_redis),
     ):
-        response = await app_client.get(HEALTH_URL)
+        response = await app_client.get(HEALTH_DETAIL_URL)
 
     assert response.status_code == 200
     data = response.json()
@@ -128,7 +161,7 @@ async def test_health_both_unavailable_when_all_down(app_client):
         patch("app.main.AsyncSessionLocal", return_value=mock_session),
         patch("app.main.redis_client", mock_redis),
     ):
-        response = await app_client.get(HEALTH_URL)
+        response = await app_client.get(HEALTH_DETAIL_URL)
 
     assert response.status_code == 200
     data = response.json()
