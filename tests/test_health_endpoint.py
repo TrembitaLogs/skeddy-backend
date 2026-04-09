@@ -191,3 +191,17 @@ async def test_health_response_time(app_client):
 
     assert response.status_code == 200
     assert elapsed_ms < 500, f"Health check took {elapsed_ms:.0f}ms, expected <500ms"
+
+
+@pytest.mark.asyncio
+async def test_health_detail_includes_rate_limiter_fallback_stats(app_client):
+    """GET /health?detail=<key> includes rate_limiter_fallback stats."""
+    response = await app_client.get(HEALTH_DETAIL_URL)
+    assert response.status_code == 200
+    data = response.json()
+    assert "rate_limiter_fallback" in data
+    stats = data["rate_limiter_fallback"]
+    assert "activations" in stats
+    assert "rejections" in stats
+    assert isinstance(stats["activations"], int)
+    assert isinstance(stats["rejections"], int)

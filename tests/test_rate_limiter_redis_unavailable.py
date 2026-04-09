@@ -154,9 +154,7 @@ async def test_storage_failure_is_logged(failopen_app, caplog):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             await client.post("/auth/login")
 
-    assert any(
-        "rate limit storage unavailable" in record.message.lower() for record in caplog.records
-    )
+    assert any("rate_limiter_fallback_active" in record.message for record in caplog.records)
 
 
 # ─── Test 5: After recovery, rate limiting works again ───
@@ -227,3 +225,109 @@ async def test_fallback_enforces_limit_when_threshold_exceeded(failopen_app):
             # Next request should be rate limited by the in-memory fallback
             r = await client.post("/auth/login")
             assert r.status_code == 429
+
+
+# ─── Test 8: Fallback activation counter increments ───
+
+
+@pytest.mark.asyncio
+async def test_fallback_activation_counter_increments(failopen_app):
+    """Each Redis failure increments the fallback activation counter."""
+    app, test_limiter = failopen_app
+    transport = ASGITransport(app=app)
+
+    initial = test_limiter.fallback_stats["activations"]
+
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/auth/login")
+            await client.post("/auth/login")
+            await client.post("/auth/login")
+
+    assert test_limiter.fallback_stats["activations"] == initial + 3
+
+
+# ─── Test 9: Fallback rejection counter increments ───
+
+
+@pytest.mark.asyncio
+async def test_fallback_rejection_counter_increments(failopen_app):
+    """Rejections by in-memory fallback are counted."""
+    from app.middleware.rate_limiter import _FALLBACK_MAX_REQUESTS
+
+    app, test_limiter = failopen_app
+    transport = ASGITransport(app=app)
+
+    initial_rejections = test_limiter.fallback_stats["rejections"]
+
+    with patch.object(test_limiter._limiter, "hit", side_effect=RedisError("Connection refused")):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            for _ in range(_FALLBACK_MAX_REQUESTS):
+                await client.post("/auth/login")
+            # These two should be rejected
+            await client.post("/auth/login")
+            await client.post("/auth/login")
+
+    assert test_limiter.fallback_stats["rejections"] == initial_rejections + 2
+
+
+# ─── Test 10: Fallback stats exposed in property ───
+
+
+def test_fallback_stats_returns_dict():
+    """fallback_stats property returns a dict with activations and rejections."""
+    test_limiter = ResilientLimiter(
+        key_func=get_remote_address,
+        storage_uri="memory://",
+    )
+    stats = test_limiter.fallback_stats
+    assert stats == {"activations": 0, "rejections": 0}
+
+
+# ─── Test 11: Fallback activation log is structured ───
+
+
+@pytest.mark.asyncio
+async def test_fallback_activation_log_includes_count(failopen_app, caplog):
+    """Fallback activation log includes activation_count for monitoring."""
+    app, test_limiter = failopen_app
+    transport = ASGITransport(app=app)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="app.middleware.rate_limiter"),
+        patch.object(
+            test_limiter._limiter,
+            "hit",
+            side_effect=RedisError("Connection refused"),
+        ),
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/auth/login")
+
+    assert any("activation_count=" in record.message for record in caplog.records)
+
+
+# ─── Test 12: Fallback rejection log includes key ───
+
+
+@pytest.mark.asyncio
+async def test_fallback_rejection_log_includes_key(failopen_app, caplog):
+    """Fallback rejection log includes the rate-limited key for debugging."""
+    from app.middleware.rate_limiter import _FALLBACK_MAX_REQUESTS
+
+    app, test_limiter = failopen_app
+    transport = ASGITransport(app=app)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="app.middleware.rate_limiter"),
+        patch.object(
+            test_limiter._limiter,
+            "hit",
+            side_effect=RedisError("Connection refused"),
+        ),
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            for _ in range(_FALLBACK_MAX_REQUESTS + 1):
+                await client.post("/auth/login")
+
+    assert any("rate_limiter_fallback_rejected" in record.message for record in caplog.records)
