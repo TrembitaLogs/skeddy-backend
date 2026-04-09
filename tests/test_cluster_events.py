@@ -525,11 +525,11 @@ class TestRideFoundPenalizesDevice:
         # Mock config service to return a credit cost
         with (
             patch(
-                "app.services.ride_service.penalize_device_in_cluster",
+                "app.services.ride_service.billing.penalize_device_in_cluster",
                 new_callable=AsyncMock,
             ) as mock_penalize,
             patch(
-                "app.services.ride_service.get_ride_credit_cost",
+                "app.services.ride_service.billing.get_ride_credit_cost",
                 new_callable=AsyncMock,
                 return_value=1,
             ),
@@ -568,11 +568,11 @@ class TestRideFoundPenalizesDevice:
 
         with (
             patch(
-                "app.services.ride_service.penalize_device_in_cluster",
+                "app.services.ride_service.billing.penalize_device_in_cluster",
                 new_callable=AsyncMock,
             ) as mock_penalize,
             patch(
-                "app.services.ride_service.get_ride_credit_cost",
+                "app.services.ride_service.billing.get_ride_credit_cost",
                 new_callable=AsyncMock,
                 return_value=1,
             ),
@@ -612,12 +612,12 @@ class TestRideFoundPenalizesDevice:
 
         with (
             patch(
-                "app.services.ride_service.penalize_device_in_cluster",
+                "app.services.ride_service.billing.penalize_device_in_cluster",
                 new_callable=AsyncMock,
                 side_effect=Exception("Redis down"),
             ),
             patch(
-                "app.services.ride_service.get_ride_credit_cost",
+                "app.services.ride_service.billing.get_ride_credit_cost",
                 new_callable=AsyncMock,
                 return_value=1,
             ),

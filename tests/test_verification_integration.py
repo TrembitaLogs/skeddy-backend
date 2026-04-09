@@ -122,8 +122,12 @@ async def _create_ride_via_api(app_client, headers, ride_hash, price=25.50):
         },
     )
     with (
-        patch("app.services.ride_service.send_push", new_callable=AsyncMock, return_value=True),
-        patch("app.services.ride_service.send_credits_depleted", new_callable=AsyncMock),
+        patch(
+            "app.services.ride_service.billing.send_push",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch("app.services.ride_service.billing.send_credits_depleted", new_callable=AsyncMock),
     ):
         resp = await app_client.post(RIDES_URL, json=body, headers=headers)
     assert resp.status_code in (200, 201)
