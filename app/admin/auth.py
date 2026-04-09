@@ -63,6 +63,8 @@ class AdminAuth(AuthenticationBackend):
         if secrets.compare_digest(username, settings.ADMIN_USERNAME) and verify_password(
             password, settings.ADMIN_PASSWORD
         ):
+            # Regenerate session to prevent session fixation attacks
+            request.session.clear()
             request.session.update({"admin_authenticated": True})
             logger.info("Admin login successful", extra={"username": username, "ip": client_ip})
             return True

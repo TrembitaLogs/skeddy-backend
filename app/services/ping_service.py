@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.accept_failure import AcceptFailure as AcceptFailureModel
 from app.models.paired_device import PairedDevice
-from app.models.ride import Ride
+from app.models.ride import Ride, VerificationStatus
 from app.models.search_filters import SearchFilters
 from app.schemas.ping import AcceptFailureItem, PingRequest, PingStats, RideStatusReport
 from app.services.credit_service import refund_credits_in_txn
@@ -442,7 +442,7 @@ async def process_expired_verifications(
     result = await db.execute(
         select(Ride).where(
             Ride.user_id == user_id,
-            Ride.verification_status == "PENDING",
+            Ride.verification_status == VerificationStatus.PENDING,
             Ride.verification_deadline < now,
         )
     )
@@ -459,7 +459,11 @@ async def process_expired_verifications(
         # unsafe after a savepoint rollback.
         ride_id = ride.id
         credits_charged = ride.credits_charged
-        new_status = "CANCELLED" if ride.last_reported_present is False else "CONFIRMED"
+        new_status = (
+            VerificationStatus.CANCELLED
+            if ride.last_reported_present is False
+            else VerificationStatus.CONFIRMED
+        )
 
         try:
             async with db.begin_nested():
@@ -470,7 +474,7 @@ async def process_expired_verifications(
                     sa_update(Ride)
                     .where(
                         Ride.id == ride_id,
-                        Ride.verification_status == "PENDING",
+                        Ride.verification_status == VerificationStatus.PENDING,
                     )
                     .values(
                         verification_status=new_status,
@@ -488,7 +492,7 @@ async def process_expired_verifications(
                     continue
 
                 # CANCELLED with credits → refund in the same savepoint.
-                if new_status == "CANCELLED" and credits_charged > 0:
+                if new_status == VerificationStatus.CANCELLED and credits_charged > 0:
                     new_balance = await refund_credits_in_txn(
                         user_id=user_id,
                         amount=credits_charged,
@@ -512,7 +516,7 @@ async def process_expired_verifications(
                     )
 
             # Savepoint committed — log the outcome.
-            if new_status == "CONFIRMED":
+            if new_status == VerificationStatus.CONFIRMED:
                 logger.info("RIDE_AUTO_CONFIRMED: ride_id=%s", ride_id)
             else:
                 logger.info("RIDE_AUTO_CANCELLED: ride_id=%s", ride_id)
@@ -588,7 +592,7 @@ async def build_verify_rides(
     result = await db.execute(
         select(Ride).where(
             Ride.user_id == user_id,
-            Ride.verification_status == "PENDING",
+            Ride.verification_status == VerificationStatus.PENDING,
             Ride.verification_deadline > now,
         )
     )

@@ -30,7 +30,6 @@ from app.services.ping_service import (
     process_stats_if_new,
     save_accept_failures,
     update_device_state,
-    validate_timezone,
 )
 from app.services.search_service import get_search_status
 
@@ -63,8 +62,7 @@ async def ping(
     9. Determine search state: is_active AND within schedule
     10. Calculate interval, save to device, return response
     """
-    # 1. Validate timezone
-    validate_timezone(body.timezone)
+    # 1. Timezone validated by PingRequest schema.
 
     # 2. Update device state (last_ping_at, timezone, health fields).
     # Done early so health monitoring always has fresh data, even if

@@ -1,8 +1,9 @@
 import re
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import AfterValidator, BaseModel, EmailStr, Field, field_validator
 
 
 def _validate_password_uppercase(v: str) -> str:
@@ -12,17 +13,15 @@ def _validate_password_uppercase(v: str) -> str:
     return v
 
 
+PasswordStr = Annotated[str, Field(min_length=8), AfterValidator(_validate_password_uppercase)]
+
+
 class RegisterRequest(BaseModel):
     """Registration request schema."""
 
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: PasswordStr
     phone_number: str | None = None
-
-    @field_validator("password")
-    @classmethod
-    def password_needs_uppercase(cls, v: str) -> str:
-        return _validate_password_uppercase(v)
 
     @field_validator("phone_number")
     @classmethod
@@ -53,12 +52,7 @@ class ChangePasswordRequest(BaseModel):
     """Change password request schema."""
 
     current_password: str
-    new_password: str = Field(min_length=8)
-
-    @field_validator("new_password")
-    @classmethod
-    def password_needs_uppercase(cls, v: str) -> str:
-        return _validate_password_uppercase(v)
+    new_password: PasswordStr
 
 
 class RefreshRequest(BaseModel):
@@ -96,12 +90,7 @@ class ResetPasswordRequest(BaseModel):
 
     email: EmailStr
     code: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$")
-    new_password: str = Field(min_length=8)
-
-    @field_validator("new_password")
-    @classmethod
-    def password_needs_uppercase(cls, v: str) -> str:
-        return _validate_password_uppercase(v)
+    new_password: PasswordStr
 
 
 class VerifyEmailRequest(BaseModel):
