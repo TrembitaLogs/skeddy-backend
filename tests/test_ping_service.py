@@ -76,7 +76,18 @@ def _patch_now(target_now: datetime):
                 return target_now.astimezone(tz)
             return target_now
 
-    return patch("app.services.ping_service.datetime", _FakeDatetime)
+    import contextlib
+
+    @contextlib.contextmanager
+    def _combined():
+        with (
+            patch("app.services.ping_service.schedule.datetime", _FakeDatetime),
+            patch("app.services.ping_service.device.datetime", _FakeDatetime),
+            patch("app.services.ping_service.verification.datetime", _FakeDatetime),
+        ):
+            yield
+
+    return _combined()
 
 
 # --- Test 1: valid timezone 'America/New_York' → returns ZoneInfo ---
