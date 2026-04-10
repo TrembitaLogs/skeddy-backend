@@ -1,3 +1,4 @@
+import asyncio
 import types
 from unittest.mock import AsyncMock, patch
 
@@ -5,6 +6,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 import app.models
 from app.config import settings
@@ -59,17 +61,34 @@ assert "_test" in TEST_DATABASE_URL, (
     f"Got: {TEST_DATABASE_URL}"
 )
 
+# Module-level engine with NullPool — each connect() creates a fresh connection
+# and each close() actually closes it. Avoids cross-event-loop issues entirely.
+_test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _setup_test_db():
+    """Create test tables once per session, drop on teardown."""
+
+    async def _create():
+        async with _test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+
+    async def _drop():
+        async with _test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await _test_engine.dispose()
+
+    asyncio.run(_create())
+    yield
+    asyncio.run(_drop())
+
 
 @pytest_asyncio.fixture
 async def db_session():
-    """Provide a transactional database session using a separate test database."""
-    engine = create_async_engine(TEST_DATABASE_URL)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-
-    conn = await engine.connect()
+    """Provide a transactional database session — rolled back after each test."""
+    conn = await _test_engine.connect()
     trans = await conn.begin()
     session = AsyncSession(
         bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
@@ -80,7 +99,6 @@ async def db_session():
     await session.close()
     await trans.rollback()
     await conn.close()
-    await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -160,9 +178,8 @@ async def app_client(db_session, fake_redis):
 
     # Rebind sqladmin session_maker and AsyncSessionLocal to the test database
     # so admin views query the same DB where test fixtures create tables.
-    test_engine = create_async_engine(TEST_DATABASE_URL)
     test_session_maker = async_sessionmaker(
-        bind=test_engine, class_=AsyncSession, autoflush=False, autocommit=False
+        bind=_test_engine, class_=AsyncSession, autoflush=False, autocommit=False
     )
     from sqladmin.models import ModelView
 
@@ -194,7 +211,6 @@ async def app_client(db_session, fake_redis):
     cluster_map_mod.AsyncSessionLocal = orig_cluster_session
     for view_cls, orig in originals.items():
         view_cls.session_maker = orig
-    await test_engine.dispose()
     app.dependency_overrides.clear()
     limiter.enabled = True
     await app_engine.dispose()

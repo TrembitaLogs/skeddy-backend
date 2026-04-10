@@ -6,6 +6,7 @@ from app.models.email_template import EmailTemplate
 from app.models.legacy_credit import LegacyCredit
 from app.models.paired_device import PairedDevice
 from app.models.purchase_order import PurchaseOrder
+from app.models.push_template import PushTemplate
 from app.models.refresh_token import RefreshToken
 from app.models.ride import Ride
 from app.models.search_filters import SearchFilters
@@ -21,6 +22,7 @@ __all__ = [
     "LegacyCredit",
     "PairedDevice",
     "PurchaseOrder",
+    "PushTemplate",
     "RefreshToken",
     "Ride",
     "SearchFilters",

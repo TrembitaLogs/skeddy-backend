@@ -110,6 +110,15 @@ def clean_db():
     yield
     _ddl("DROP SCHEMA public CASCADE")
     _ddl("CREATE SCHEMA public")
+    # Restore tables so subsequent test modules find the schema intact
+    from app.database import Base
+    from tests.conftest import _test_engine
+
+    async def _restore():
+        async with _test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_restore())
 
 
 # ---- Test 1: alembic upgrade head seeds all billing keys ----
