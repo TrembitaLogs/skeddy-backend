@@ -49,6 +49,14 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=401, detail="USER_NOT_FOUND")
 
+    # Reject tokens issued before the last password change
+    if user.password_changed_at is not None:
+        iat = payload.get("iat")
+        if iat is not None:
+            pw_changed_ts = user.password_changed_at.timestamp()
+            if iat < pw_changed_ts:
+                raise HTTPException(status_code=401, detail="TOKEN_REVOKED")
+
     # Inject user_id into logging context for all downstream log messages
     user_id_ctx.set(str(user.id))
 

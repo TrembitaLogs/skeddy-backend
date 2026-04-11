@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, security
 from app.dependencies.redis import require_redis
 from app.middleware.rate_limiter import get_user_key, limiter
 from app.models.credit_transaction import CreditTransaction, TransactionType
@@ -350,6 +350,7 @@ async def change_password(
         raise HTTPException(status_code=401, detail="INVALID_CURRENT_PASSWORD")
 
     current_user.password_hash = hash_password(body.new_password)
+    current_user.password_changed_at = datetime.now(UTC)
     await db.commit()
     await delete_user_refresh_tokens(db, current_user.id)
     return OkResponse()
@@ -379,11 +380,16 @@ async def delete_account(
     request: Request,
     response: Response,
     body: DeleteAccountRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(require_redis),
 ):
     if not verify_password(body.password, current_user.password_hash):
         raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
+
+    # Blacklist the current access token so it cannot be reused after deletion
+    await blacklist_access_token(redis, credentials.credentials)
 
     await db.delete(current_user)
     await db.commit()
@@ -440,6 +446,7 @@ async def reset_password(
         raise HTTPException(status_code=401, detail="INVALID_RESET_CODE")
 
     user.password_hash = hash_password(body.new_password)
+    user.password_changed_at = datetime.now(UTC)
     await db.commit()
 
     # Invalidate all refresh tokens (force re-login on all devices)
