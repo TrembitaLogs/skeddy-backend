@@ -10,6 +10,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
+import app.redis as redis_mod
 from app.admin import setup_admin
 from app.config import settings
 from app.database import AsyncSessionLocal
@@ -21,7 +22,7 @@ from app.middleware.logging import setup_logging
 from app.middleware.rate_limiter import limiter, setup_rate_limiter
 from app.middleware.request_id import RequestIdMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
-from app.redis import redis_client
+from app.redis import close_redis, init_redis
 from app.routers.auth import router as auth_router
 from app.routers.credits import router as credits_router
 from app.routers.fcm import router as fcm_router
@@ -53,7 +54,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — create Redis client via DI-friendly lifecycle
+    init_redis()
+
     try:
         initialize_firebase()
     except (ValueError, FileNotFoundError, KeyError):
@@ -86,7 +89,7 @@ async def lifespan(app: FastAPI):
             await task
 
     # Close Redis connection pool to prevent connection leaks
-    await redis_client.aclose()
+    await close_redis()
 
 
 app = FastAPI(
@@ -150,7 +153,7 @@ async def health_check(x_admin_secret: str = Header("", alias="X-Admin-Secret"))
         logger.warning("Health check: PostgreSQL unavailable", exc_info=True)
 
     try:
-        await redis_client.ping()  # type: ignore[misc]
+        await redis_mod.redis_client.ping()  # type: ignore[misc]
         redis_ok = True
     except Exception:
         logger.warning("Health check: Redis unavailable", exc_info=True)

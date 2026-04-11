@@ -27,6 +27,7 @@ class PairedDevice(Base):
     registered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_ping_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_interval_sent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -45,4 +46,5 @@ class PairedDevice(Base):
     __table_args__ = (
         Index("idx_paired_devices_device_id", "device_id", unique=True),
         Index("idx_paired_devices_token_hash", "device_token_hash"),
+        Index("idx_paired_devices_expires_at", "expires_at"),
     )

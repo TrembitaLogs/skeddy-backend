@@ -99,7 +99,7 @@ async def test_health_redis_ok_when_available(app_client):
     mock_redis = AsyncMock()
     mock_redis.ping = AsyncMock(return_value=True)
 
-    with patch("app.main.redis_client", mock_redis):
+    with patch("app.redis.redis_client", mock_redis):
         response = await app_client.get(HEALTH_URL, headers=HEALTH_DETAIL_HEADERS)
 
     assert response.status_code == 200
@@ -113,7 +113,7 @@ async def test_health_redis_unavailable_when_down(app_client):
     mock_redis = AsyncMock()
     mock_redis.ping = AsyncMock(side_effect=ConnectionError("connection refused"))
 
-    with patch("app.main.redis_client", mock_redis):
+    with patch("app.redis.redis_client", mock_redis):
         response = await app_client.get(HEALTH_URL, headers=HEALTH_DETAIL_HEADERS)
 
     assert response.status_code == 200
@@ -135,7 +135,7 @@ async def test_health_status_ok_when_all_services_available(app_client):
 
     with (
         patch("app.main.AsyncSessionLocal", return_value=mock_session),
-        patch("app.main.redis_client", mock_redis),
+        patch("app.redis.redis_client", mock_redis),
     ):
         response = await app_client.get(HEALTH_URL, headers=HEALTH_DETAIL_HEADERS)
 
@@ -159,7 +159,7 @@ async def test_health_both_unavailable_when_all_down(app_client):
 
     with (
         patch("app.main.AsyncSessionLocal", return_value=mock_session),
-        patch("app.main.redis_client", mock_redis),
+        patch("app.redis.redis_client", mock_redis),
     ):
         response = await app_client.get(HEALTH_URL, headers=HEALTH_DETAIL_HEADERS)
 
@@ -183,7 +183,7 @@ async def test_health_response_time(app_client):
 
     with (
         patch("app.main.AsyncSessionLocal", return_value=mock_session),
-        patch("app.main.redis_client", mock_redis),
+        patch("app.redis.redis_client", mock_redis),
     ):
         start = time.monotonic()
         response = await app_client.get(HEALTH_URL)

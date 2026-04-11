@@ -1,12 +1,14 @@
 import hashlib
 import logging
 import secrets
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.accept_failure import AcceptFailure
 from app.models.paired_device import PairedDevice
 from app.models.user import User
@@ -73,6 +75,7 @@ async def create_paired_device(
         device_model=device_model,
         device_token_hash=token_hash,
         timezone=tz,
+        expires_at=datetime.now(UTC) + timedelta(days=settings.DEVICE_TOKEN_EXPIRE_DAYS),
     )
     db.add(device)
     await db.flush()
