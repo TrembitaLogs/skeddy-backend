@@ -59,7 +59,7 @@ async def _fetch_cluster_data() -> dict:
                 continue
             cluster_info = json.loads(cluster_raw)
 
-            member_ids = await redis.smembers(f"cluster_members:{cid}")  # type: ignore[misc]
+            member_ids = await redis.smembers(f"cluster_members:{cid}")
             if not member_ids:
                 continue
 
