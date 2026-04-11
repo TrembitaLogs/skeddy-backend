@@ -56,7 +56,7 @@ def _patch_now(target_now: datetime):
             patch("app.services.ping_service.schedule.datetime", _FakeDatetime),
             patch("app.services.ping_service.device.datetime", _FakeDatetime),
             patch("app.services.ping_service.verification.datetime", _FakeDatetime),
-            patch("app.routers.ping.datetime", _FakeDatetime),
+            patch("app.services.ping_service.orchestration.datetime", _FakeDatetime),
         ):
             yield
 
@@ -166,7 +166,7 @@ async def test_cluster_disabled_normal_behaviour(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value=None,
         ) as mock_cg,
@@ -202,7 +202,7 @@ async def test_solo_device_normal_behaviour(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -234,7 +234,7 @@ async def test_penalized_device_search_false(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value={"search": False, "interval_seconds": 60},
         ),
@@ -266,7 +266,7 @@ async def test_cluster_search_turn(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value={"search": True, "interval_seconds": 45},
         ),
@@ -298,7 +298,7 @@ async def test_cluster_wait(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value={"search": False, "interval_seconds": 12},
         ),
@@ -330,7 +330,7 @@ async def test_cluster_redis_error_fallback(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -358,7 +358,7 @@ async def test_search_inactive_skips_cluster_gate(app_client, db_session):
     pairing = await _pair_device(app_client, "inact@example.com", device_id="inact-dev")
 
     with patch(
-        "app.routers.ping.cluster_gate",
+        "app.services.ping_service.orchestration.cluster_gate",
         new_callable=AsyncMock,
     ) as mock_cg:
         resp = await app_client.post(
@@ -390,7 +390,7 @@ async def test_cluster_interval_saved_to_device(app_client, db_session):
     with (
         _patch_now(now),
         patch(
-            "app.routers.ping.cluster_gate",
+            "app.services.ping_service.orchestration.cluster_gate",
             new_callable=AsyncMock,
             return_value={"search": True, "interval_seconds": 90},
         ),

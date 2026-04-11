@@ -1,8 +1,11 @@
 """Tests for CreditBalanceAdmin view and Adjust Balance action."""
 
 import uuid
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, patch
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
 from app.admin.credit_balance import CreditBalanceAdmin
@@ -13,6 +16,21 @@ from app.models.user import User
 
 def _make_user(email: str = "balance@example.com") -> User:
     return User(email=email, password_hash="hashed")
+
+
+@pytest_asyncio.fixture
+async def admin_balance_env(admin_client, db_session, fake_redis, monkeypatch):
+    """Patch credit_balance module to use test DB session and fake Redis."""
+    import app.admin.credit_balance as cb_mod
+
+    @asynccontextmanager
+    async def test_session_factory():
+        yield db_session
+
+    monkeypatch.setattr(cb_mod, "AsyncSessionLocal", test_session_factory)
+    monkeypatch.setattr(cb_mod, "redis_client", fake_redis)
+
+    return admin_client.client
 
 
 # ---------------------------------------------------------------------------
@@ -422,3 +440,210 @@ class TestColumnFormatters:
                 sortable_keys.add(col.key)
         assert "balance" in sortable_keys
         assert "updated_at" in sortable_keys
+
+    def test_column_labels_include_user(self):
+        """Column labels map user to 'User Email'."""
+        assert CreditBalanceAdmin.column_labels["user"] == "User Email"
+
+
+# ---------------------------------------------------------------------------
+# HTTP Integration Tests — adjust_balance_form GET
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_form_get_renders_for_valid_pk(admin_balance_env, db_session):
+    """GET adjust form with valid PK renders the form with user info."""
+    client = admin_balance_env
+    user = _make_user("form-get@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=500)
+    db_session.add(cb)
+    await db_session.flush()
+
+    resp = await client.get(f"/admin/credit-balance/adjust/{cb.id}")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "form-get@example.com" in body
+    assert "500" in body
+
+
+@pytest.mark.asyncio
+async def test_form_get_invalid_pk_redirects_to_list(admin_balance_env):
+    """GET adjust form with nonexistent PK redirects to list."""
+    client = admin_balance_env
+    fake_pk = uuid.uuid4()
+    resp = await client.get(
+        f"/admin/credit-balance/adjust/{fake_pk}",
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303, 307)
+    assert "/admin/credit-balance/list" in resp.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# HTTP Integration Tests — adjust_balance_form POST (validation)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_form_post_invalid_amount_shows_error(admin_balance_env, db_session):
+    """POST with non-integer amount shows validation error."""
+    client = admin_balance_env
+    user = _make_user("invalid-amt@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=100)
+    db_session.add(cb)
+    await db_session.flush()
+
+    resp = await client.post(
+        f"/admin/credit-balance/adjust/{cb.id}",
+        data={"amount": "abc", "description": "test"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+    assert "Amount must be a valid integer" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_form_post_zero_amount_shows_error(admin_balance_env, db_session):
+    """POST with amount=0 shows validation error."""
+    client = admin_balance_env
+    user = _make_user("zero-amt@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=100)
+    db_session.add(cb)
+    await db_session.flush()
+
+    resp = await client.post(
+        f"/admin/credit-balance/adjust/{cb.id}",
+        data={"amount": "0", "description": "test"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+    assert "Amount cannot be zero" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_form_post_negative_result_shows_error(admin_balance_env, db_session):
+    """POST with negative amount exceeding balance shows validation error."""
+    client = admin_balance_env
+    user = _make_user("neg-result@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=10)
+    db_session.add(cb)
+    await db_session.flush()
+
+    resp = await client.post(
+        f"/admin/credit-balance/adjust/{cb.id}",
+        data={"amount": "-20", "description": "test"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+    assert "Cannot go below 0" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_form_post_empty_description_shows_error(admin_balance_env, db_session):
+    """POST with empty description shows validation error."""
+    client = admin_balance_env
+    user = _make_user("no-desc@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=100)
+    db_session.add(cb)
+    await db_session.flush()
+
+    resp = await client.post(
+        f"/admin/credit-balance/adjust/{cb.id}",
+        data={"amount": "50", "description": ""},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+    assert "Description is required" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# HTTP Integration Tests — adjust_balance_form POST (success)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("app.admin.credit_balance.send_balance_adjusted", new_callable=AsyncMock)
+async def test_form_post_successful_adjustment(mock_fcm, admin_balance_env, db_session):
+    """POST with valid data adjusts balance and shows success message."""
+    client = admin_balance_env
+    user = _make_user("success-adj@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=100)
+    db_session.add(cb)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/admin/credit-balance/adjust/{cb.id}",
+        data={"amount": "50", "description": "Support refund"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+    assert "Balance adjusted by +50" in resp.text
+    assert "New balance: 150" in resp.text
+    mock_fcm.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.admin.credit_balance.send_balance_adjusted", new_callable=AsyncMock)
+async def test_form_post_negative_adjustment_success(mock_fcm, admin_balance_env, db_session):
+    """POST with valid negative amount deducts correctly."""
+    client = admin_balance_env
+    user = _make_user("neg-adj@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=200)
+    db_session.add(cb)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/admin/credit-balance/adjust/{cb.id}",
+        data={"amount": "-75", "description": "Chargeback"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+    assert "Balance adjusted by -75" in resp.text
+    assert "New balance: 125" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# HTTP Integration Tests — adjust_balance_form POST (service error)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_form_post_service_error_shows_error(admin_balance_env, db_session):
+    """POST that triggers OperationalError shows error message."""
+    from sqlalchemy.exc import OperationalError
+
+    client = admin_balance_env
+    user = _make_user("svc-err@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    cb = CreditBalance(user_id=user.id, balance=100)
+    db_session.add(cb)
+    await db_session.flush()
+
+    with patch(
+        "app.admin.credit_balance.add_credits",
+        new_callable=AsyncMock,
+        side_effect=OperationalError("DB lock timeout", {}, None),
+    ):
+        resp = await client.post(
+            f"/admin/credit-balance/adjust/{cb.id}",
+            data={"amount": "10", "description": "test"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    assert resp.status_code == 200
+    assert "Failed to adjust balance" in resp.text
