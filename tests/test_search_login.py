@@ -50,7 +50,8 @@ async def test_search_login_valid_credentials_returns_device_token(app_client):
     assert resp.status_code == 200
     data = resp.json()
     assert "device_token" in data
-    UUID(data["device_token"])  # must be valid UUID
+    assert isinstance(data["device_token"], str)
+    assert len(data["device_token"]) > 0
     assert data["user_id"] == user_id
 
 

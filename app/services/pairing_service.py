@@ -1,6 +1,7 @@
 import hashlib
 import logging
-from uuid import UUID, uuid4
+import secrets
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
@@ -128,7 +129,7 @@ async def search_login(
         await delete_accept_failures(db, user.id)
 
     # 5. Generate device token with SHA256 hash
-    device_token = str(uuid4())
+    device_token = secrets.token_urlsafe(48)
     token_hash = hashlib.sha256(device_token.encode()).hexdigest()
 
     # 6. Create new paired device record
