@@ -6,6 +6,7 @@ from sqlalchemy import delete
 from sqlalchemy.exc import OperationalError
 
 from app.database import AsyncSessionLocal
+from app.models.paired_device import PairedDevice
 from app.models.refresh_token import RefreshToken
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,23 @@ async def delete_expired_refresh_tokens(db) -> int:
     return result.rowcount  # type: ignore[no-any-return]
 
 
+async def delete_expired_device_tokens(db) -> int:
+    """Delete all paired devices whose expires_at is in the past.
+
+    Returns the number of deleted rows.
+    """
+    now_utc = datetime.now(UTC)
+    stmt = delete(PairedDevice).where(
+        PairedDevice.expires_at.isnot(None),
+        PairedDevice.expires_at < now_utc,
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+    return result.rowcount  # type: ignore[no-any-return]
+
+
 async def cleanup_expired_tokens() -> None:
-    """Background task that deletes expired refresh tokens once per day.
+    """Background task that deletes expired refresh and device tokens once per day.
 
     Runs in an infinite loop with a 24-hour sleep interval.
     An initial delay staggers startup so that multiple cleanup tasks
@@ -50,6 +66,16 @@ async def cleanup_expired_tokens() -> None:
                 else:
                     logger.debug("Token cleanup: no expired refresh tokens found")
         except OperationalError:
-            logger.exception("Token cleanup error")
+            logger.exception("Token cleanup error (refresh tokens)")
+
+        try:
+            async with AsyncSessionLocal() as db:
+                deleted = await delete_expired_device_tokens(db)
+                if deleted > 0:
+                    logger.info("Token cleanup: deleted %d expired device token(s)", deleted)
+                else:
+                    logger.debug("Token cleanup: no expired device tokens found")
+        except OperationalError:
+            logger.exception("Token cleanup error (device tokens)")
 
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)

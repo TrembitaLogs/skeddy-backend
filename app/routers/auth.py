@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 
 import aiosmtplib
@@ -440,6 +442,9 @@ async def request_reset(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(require_redis),
 ):
+    # Constant-time: record start so we can pad the response time
+    start = time.monotonic()
+
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
@@ -451,6 +456,13 @@ async def request_reset(
             await send_password_reset_code(body.email, code, user.language, db, redis)
         except (aiosmtplib.SMTPException, RedisError, OSError):
             logger.warning("Failed to send reset email for password reset request")
+
+    # Constant-time delay: ensure minimum 0.2s regardless of code path
+    # to prevent timing-based user enumeration
+    elapsed = time.monotonic() - start
+    remaining = 0.2 - elapsed
+    if remaining > 0:
+        await asyncio.sleep(remaining)
 
     logger.info("Password reset requested")
 

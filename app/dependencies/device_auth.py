@@ -1,4 +1,5 @@
 import hashlib
+from datetime import UTC, datetime
 
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
@@ -17,13 +18,13 @@ async def verify_device(
 
     Extracts X-Device-Token and X-Device-Id headers, hashes the token
     with SHA256, and looks up the device in the database by both
-    token_hash AND device_id.
+    token_hash AND device_id. Rejects expired tokens.
 
     Returns:
         The matching PairedDevice record.
 
     Raises:
-        HTTPException(401): If the token/device_id combination is invalid.
+        HTTPException(401): If the token/device_id combination is invalid or expired.
     """
     token_hash = hashlib.sha256(x_device_token.encode()).hexdigest()
 
@@ -37,5 +38,8 @@ async def verify_device(
 
     if not device:
         raise HTTPException(status_code=401, detail="INVALID_DEVICE_TOKEN")
+
+    if device.expires_at is not None and device.expires_at < datetime.now(UTC):
+        raise HTTPException(status_code=401, detail="DEVICE_TOKEN_EXPIRED")
 
     return device
