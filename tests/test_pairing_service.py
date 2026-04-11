@@ -1,5 +1,4 @@
 import hashlib
-from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -49,7 +48,7 @@ async def _create_accept_failure(db, user_id, reason="TestReason") -> AcceptFail
     return failure
 
 
-# --- Test 1: valid credentials → device_token (UUID string) ---
+# --- Test 1: valid credentials → device_token (url-safe string) ---
 
 
 async def test_search_login_valid_credentials_returns_device_token(db_session):
@@ -63,8 +62,9 @@ async def test_search_login_valid_credentials_returns_device_token(db_session):
         db=db_session,
     )
 
-    # device_token must be a valid UUID string
-    UUID(device_token)  # raises ValueError if not a valid UUID
+    # device_token must be a non-empty url-safe string (secrets.token_urlsafe)
+    assert isinstance(device_token, str)
+    assert len(device_token) > 0
     assert returned_user_id == user.id
 
 

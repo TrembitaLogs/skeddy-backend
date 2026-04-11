@@ -92,7 +92,7 @@ async def is_token_blacklisted(redis: Redis, jti: str) -> bool:
 
 
 def create_refresh_token() -> str:
-    return str(uuid.uuid4())
+    return secrets.token_urlsafe(32)
 
 
 def hash_refresh_token(token: str) -> str:
