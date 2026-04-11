@@ -51,7 +51,7 @@ def _patch_now(target_now: datetime):
             patch("app.services.ping_service.schedule.datetime", _FakeDatetime),
             patch("app.services.ping_service.device.datetime", _FakeDatetime),
             patch("app.services.ping_service.verification.datetime", _FakeDatetime),
-            patch("app.routers.ping.datetime", _FakeDatetime),
+            patch("app.services.ping_service.orchestration.datetime", _FakeDatetime),
         ):
             yield
 
@@ -845,7 +845,7 @@ async def test_ping_cancelled_ride_sends_fcm_refund_push(app_client, db_session)
     balance_before = result.scalar_one()
 
     with patch(
-        "app.routers.ping.send_ride_credit_refunded",
+        "app.services.ping_service.orchestration.send_ride_credit_refunded",
         new_callable=AsyncMock,
     ) as mock_fcm:
         resp = await app_client.post(
@@ -891,7 +891,7 @@ async def test_ping_fcm_failure_does_not_block_refund(app_client, db_session):
     ride_id = ride.id
 
     with patch(
-        "app.routers.ping.send_ride_credit_refunded",
+        "app.services.ping_service.orchestration.send_ride_credit_refunded",
         new_callable=AsyncMock,
         side_effect=OperationalError("FCM network error", {}, None),
     ):
@@ -935,7 +935,7 @@ async def test_ping_confirmed_ride_no_fcm_refund_push(app_client, db_session):
     await db_session.commit()
 
     with patch(
-        "app.routers.ping.send_ride_credit_refunded",
+        "app.services.ping_service.orchestration.send_ride_credit_refunded",
         new_callable=AsyncMock,
     ) as mock_fcm:
         resp = await app_client.post(
@@ -1247,7 +1247,7 @@ async def test_ping_zero_balance_still_processes_expired_verifications(app_clien
     ride_id = ride.id
 
     with patch(
-        "app.routers.ping.send_ride_credit_refunded",
+        "app.services.ping_service.orchestration.send_ride_credit_refunded",
         new_callable=AsyncMock,
     ):
         resp = await app_client.post(

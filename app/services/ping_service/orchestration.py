@@ -15,6 +15,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.search_filters import SearchFilters
 from app.services.cluster_service import cluster_gate
 from app.services.config_service.ping import PingConfigs
 from app.services.credit_service import cache_balance
@@ -78,7 +79,7 @@ async def resolve_search_state(
     user_id: UUID,
     redis: Redis,
     configs: PingConfigs,
-    filters: object,
+    filters: SearchFilters,
     timezone_str: str,
     last_cycle_duration_ms: int | None,
 ) -> tuple[bool, int]:

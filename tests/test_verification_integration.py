@@ -186,7 +186,9 @@ async def test_e2e_ride_present_true_confirmed(app_client, db_session):
     ride_id = UUID(ride_resp["ride_id"])
 
     # Ping 1: report present=true (server asked for verification in verify_rides)
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp1 = await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": True}]),
@@ -204,7 +206,9 @@ async def test_e2e_ride_present_true_confirmed(app_client, db_session):
 
     # Ping 2: triggers expired verification processing -> CONFIRMED
     balance_before = await _get_balance(db_session, user_id)
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm:
         resp2 = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp2.status_code == 200
 
@@ -242,7 +246,9 @@ async def test_e2e_ride_present_false_cancelled_with_refund(app_client, db_sessi
     assert credits_charged > 0
 
     # Ping with present=false
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -257,7 +263,9 @@ async def test_e2e_ride_present_false_cancelled_with_refund(app_client, db_sessi
     await _set_ride_deadline(db_session, ride_id, datetime.now(UTC) - timedelta(hours=1))
 
     # Ping triggers CANCELLED + refund
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm:
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
 
@@ -299,7 +307,9 @@ async def test_concurrent_pings_no_double_refund(app_client, db_session):
     ride_id = UUID(ride_resp["ride_id"])
 
     # Report present=false
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -313,7 +323,9 @@ async def test_concurrent_pings_no_double_refund(app_client, db_session):
     credits_charged = ride.credits_charged
 
     # First ping — processes the ride
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp1 = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp1.status_code == 200
 
@@ -323,7 +335,9 @@ async def test_concurrent_pings_no_double_refund(app_client, db_session):
     assert balance_after_first == balance_before + credits_charged
 
     # Second ping — ride already CANCELLED, nothing to process
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm2:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm2:
         resp2 = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp2.status_code == 200
 
@@ -357,7 +371,9 @@ async def test_single_refund_transaction_per_ride(app_client, db_session):
     ride_id = UUID(ride_resp["ride_id"])
 
     # Report present=false and expire deadline
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -367,7 +383,10 @@ async def test_single_refund_transaction_per_ride(app_client, db_session):
 
     # Process through 3 pings to ensure no duplicates
     for _ in range(3):
-        with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+        with patch(
+            "app.services.ping_service.orchestration.send_ride_credit_refunded",
+            new_callable=AsyncMock,
+        ):
             resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
             assert resp.status_code == 200
 
@@ -405,7 +424,9 @@ async def test_single_fcm_push_per_ride(app_client, db_session):
     ride_id = UUID(ride_resp["ride_id"])
 
     # Report present=false and expire deadline
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -417,7 +438,8 @@ async def test_single_fcm_push_per_ride(app_client, db_session):
     total_fcm_calls = 0
     for _ in range(3):
         with patch(
-            "app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock
+            "app.services.ping_service.orchestration.send_ride_credit_refunded",
+            new_callable=AsyncMock,
         ) as mock_fcm:
             await app_client.post(PING_URL, json=_ping_body(), headers=headers)
             total_fcm_calls += mock_fcm.call_count
@@ -445,7 +467,9 @@ async def test_verify_rides_throttle_via_http(app_client, db_session):
     UUID(ride_resp["ride_id"])
 
     # First ping — ride should appear in verify_rides (never checked before)
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp1 = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp1.status_code == 200
     data1 = resp1.json()
@@ -453,7 +477,9 @@ async def test_verify_rides_throttle_via_http(app_client, db_session):
     assert ride_hash in verify_hashes_1
 
     # Second ping immediately — ride should NOT appear (throttle: < 60 min)
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp2 = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp2.status_code == 200
     data2 = resp2.json()
@@ -461,7 +487,9 @@ async def test_verify_rides_throttle_via_http(app_client, db_session):
     assert ride_hash not in verify_hashes_2
 
     # Third ping immediately — still throttled
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp3 = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp3.status_code == 200
     data3 = resp3.json()
@@ -494,7 +522,9 @@ async def test_mixed_rides_different_outcomes(app_client, db_session):
     ride_pending_id = UUID(ride_pending_resp["ride_id"])
 
     # Report: ride_confirm=present, ride_cancel=absent
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(
@@ -517,7 +547,9 @@ async def test_mixed_rides_different_outcomes(app_client, db_session):
     cancel_credits = ride_cancel.credits_charged
 
     # Ping to trigger processing
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm:
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
 
@@ -560,7 +592,9 @@ async def test_e2e_full_lifecycle_multiple_reports(app_client, db_session):
     ride_id = UUID(ride_resp["ride_id"])
 
     # Report 1: present=true
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": True}]),
@@ -571,7 +605,9 @@ async def test_e2e_full_lifecycle_multiple_reports(app_client, db_session):
     assert ride.disappeared_at is None
 
     # Report 2: present=false (temporarily disappeared)
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -583,7 +619,9 @@ async def test_e2e_full_lifecycle_multiple_reports(app_client, db_session):
     disappeared_at = ride.disappeared_at
 
     # Report 3: present=true again (reappeared)
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": True}]),
@@ -597,7 +635,9 @@ async def test_e2e_full_lifecycle_multiple_reports(app_client, db_session):
     # Expire deadline -> decision based on last report (true) -> CONFIRMED
     await _set_ride_deadline(db_session, ride_id, datetime.now(UTC) - timedelta(hours=1))
 
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm:
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
 
@@ -630,7 +670,9 @@ async def test_verify_rides_sent_when_search_inactive(app_client, db_session):
     assert resp_stop.status_code == 200
 
     # Ping — search is inactive, but verify_rides should still contain the ride
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
     data = resp.json()
@@ -658,7 +700,9 @@ async def test_refund_atomicity_with_status_change(app_client, db_session):
     credits_charged = ride.credits_charged
 
     # Report present=false and expire
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -669,7 +713,9 @@ async def test_refund_atomicity_with_status_change(app_client, db_session):
     balance_before = await _get_balance(db_session, user_id)
 
     # Process
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
 
@@ -713,7 +759,9 @@ async def test_e2e_no_reports_offline_confirmed(app_client, db_session):
     balance_before = await _get_balance(db_session, user_id)
 
     # Ping triggers processing — NULL reports -> CONFIRMED
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm:
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
 
@@ -749,7 +797,9 @@ async def test_expired_verifications_processed_when_search_inactive(app_client, 
     ride_id = UUID(ride_resp["ride_id"])
 
     # Report present=false
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock):
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ):
         await app_client.post(
             PING_URL,
             json=_ping_body(ride_statuses=[{"ride_hash": ride_hash, "present": False}]),
@@ -766,7 +816,9 @@ async def test_expired_verifications_processed_when_search_inactive(app_client, 
     await _set_ride_deadline(db_session, ride_id, datetime.now(UTC) - timedelta(hours=1))
 
     # Ping with search inactive — verification still processed
-    with patch("app.routers.ping.send_ride_credit_refunded", new_callable=AsyncMock) as mock_fcm:
+    with patch(
+        "app.services.ping_service.orchestration.send_ride_credit_refunded", new_callable=AsyncMock
+    ) as mock_fcm:
         resp = await app_client.post(PING_URL, json=_ping_body(), headers=headers)
     assert resp.status_code == 200
     assert resp.json()["search"] is False
