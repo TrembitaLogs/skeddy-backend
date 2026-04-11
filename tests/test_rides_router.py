@@ -6,7 +6,10 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 
+from app.models.credit_balance import CreditBalance
+from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.ride import Ride
+from app.models.user import User
 
 RIDES_URL = "/api/v1/rides"
 RIDES_EVENTS_URL = "/api/v1/rides/events"
@@ -60,6 +63,26 @@ def _jwt(token: str) -> dict:
 
 def _device_headers(device_token: str, device_id: str) -> dict:
     return {"X-Device-Token": device_token, "X-Device-Id": device_id}
+
+
+async def _verify_email_in_db(db_session, user_id: str):
+    """Set email_verified=True and grant registration bonus (mirrors verify-email endpoint)."""
+    uid = UUID(user_id)
+    result = await db_session.execute(select(User).where(User.id == uid))
+    user = result.scalar_one()
+    user.email_verified = True
+    cb_result = await db_session.execute(select(CreditBalance).where(CreditBalance.user_id == uid))
+    cb = cb_result.scalar_one()
+    cb.balance = 10
+    db_session.add(
+        CreditTransaction(
+            user_id=uid,
+            type=TransactionType.REGISTRATION_BONUS,
+            amount=10,
+            balance_after=10,
+        )
+    )
+    await db_session.commit()
 
 
 def _ride_body(**overrides) -> dict:
@@ -419,6 +442,7 @@ async def _create_rides_for_user(app_client, device_token, device_id, count):
 async def test_get_ride_events_first_page_no_cursor(app_client, db_session):
     """GET /rides/events without cursor -> first page with default limit=20."""
     reg = await _register(app_client, email="events1@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "events1@example.com", device_id="ev1-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev1-dev", count=3)
@@ -496,6 +520,7 @@ async def test_get_ride_events_with_cursor(app_client, db_session):
 async def test_get_ride_events_last_page(app_client, db_session):
     """GET /rides/events on last page -> has_more=false, next_cursor=null."""
     reg = await _register(app_client, email="events3@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "events3@example.com", device_id="ev3-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "ev3-dev", count=3)
@@ -543,6 +568,7 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
     from datetime import datetime, timedelta
 
     reg = await _register(app_client, email="since@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     user_id = UUID(reg["user_id"])
 
     # Use relative dates to avoid 8-week cutoff drift
@@ -585,13 +611,14 @@ async def test_get_ride_events_with_since_filters_old_events(app_client, db_sess
 
 
 async def test_get_ride_events_no_events_returns_empty(app_client, db_session):
-    """GET /rides/events for fresh user -> only REGISTRATION_BONUS credit event."""
+    """GET /rides/events for verified user -> only REGISTRATION_BONUS credit event."""
     reg = await _register(app_client, email="events5@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
 
     resp = await app_client.get(RIDES_EVENTS_URL, headers=_jwt(reg["access_token"]))
     assert resp.status_code == 200
     data = resp.json()
-    # Registration creates a REGISTRATION_BONUS credit transaction
+    # Email verification grants REGISTRATION_BONUS credit transaction
     assert len(data["events"]) == 1
     assert data["events"][0]["event_kind"] == "credit"
     assert data["events"][0]["credit_type"] == "REGISTRATION_BONUS"
@@ -726,6 +753,7 @@ async def test_create_ride_fcm_payload_values_all_strings(app_client):
 async def test_events_list_response_serialization(app_client, db_session):
     """GET /rides/events -> response has correct cursor-based structure."""
     reg = await _register(app_client, email="serial@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "serial@example.com", device_id="serial-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "serial-dev", count=2)
@@ -937,11 +965,13 @@ async def test_get_ride_events_user_isolation(app_client, db_session):
     """User A cannot see User B's rides via GET /rides/events."""
     # User A with rides
     reg_a = await _register(app_client, email="iso-a@example.com")
+    await _verify_email_in_db(db_session, reg_a["user_id"])
     pairing_a = await _pair_device(app_client, "iso-a@example.com", device_id="iso-a-dev")
     await _create_rides_for_user(app_client, pairing_a["device_token"], "iso-a-dev", count=3)
 
-    # User B with no rides
+    # User B with no rides (verified to get REGISTRATION_BONUS)
     reg_b = await _register(app_client, email="iso-b@example.com")
+    await _verify_email_in_db(db_session, reg_b["user_id"])
 
     # User B should see only own REGISTRATION_BONUS
     resp_b = await app_client.get(RIDES_EVENTS_URL, headers=_jwt(reg_b["access_token"]))
@@ -964,6 +994,7 @@ async def test_get_ride_events_user_isolation(app_client, db_session):
 async def test_get_ride_events_paginate_entire_dataset(app_client, db_session):
     """Paginating through entire dataset via cursor covers all events without overlap."""
     reg = await _register(app_client, email="fullpag@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "fullpag@example.com", device_id="fullpag-dev")
 
     await _create_rides_for_user(app_client, pairing["device_token"], "fullpag-dev", count=5)
@@ -1008,6 +1039,7 @@ async def test_get_ride_events_since_plus_cursor(app_client, db_session):
     from datetime import datetime, timedelta
 
     reg = await _register(app_client, email="sincecur@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     user_id = UUID(reg["user_id"])
 
     base_time = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
@@ -1497,6 +1529,7 @@ async def test_create_ride_charges_credits_happy_path(app_client, db_session):
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="charge-happy@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(
         app_client, "charge-happy@example.com", device_id="charge-happy-dev"
     )
@@ -1674,7 +1707,8 @@ async def test_create_ride_zero_balance_not_charged(app_client, db_session, capl
 
 async def test_create_ride_tier_matching_all_tiers(app_client, db_session):
     """POST /rides with different prices -> correct credits charged per tier."""
-    await _register(app_client, email="tiers@example.com")
+    reg = await _register(app_client, email="tiers@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "tiers@example.com", device_id="tiers-dev")
 
     # Default tiers: ≤$20→1, ≤$50→2, >$50→3
@@ -1725,6 +1759,7 @@ async def test_create_ride_credit_transaction_atomic(app_client, db_session):
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="atomic@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "atomic@example.com", device_id="atomic-dev")
     user_id = UUID(reg["user_id"])
 
@@ -1776,6 +1811,7 @@ async def test_create_ride_idempotent_replay_no_double_charge(app_client, db_ses
     from app.models.credit_transaction import CreditTransaction
 
     reg = await _register(app_client, email="no-double@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
     pairing = await _pair_device(app_client, "no-double@example.com", device_id="no-double-dev")
     user_id = UUID(reg["user_id"])
 
