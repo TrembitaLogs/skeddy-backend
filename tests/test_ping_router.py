@@ -99,7 +99,7 @@ def _ping_body(**overrides) -> dict:
     return body
 
 
-async def _verify_email_in_db(db_session, user_id: str):
+async def _verify_email_in_db(db_session, user_id: str, fake_redis=None):
     """Set email_verified=True and grant registration bonus (mirrors verify-email endpoint)."""
     uid = UUID(user_id)
     result = await db_session.execute(select(User).where(User.id == uid))
@@ -117,6 +117,9 @@ async def _verify_email_in_db(db_session, user_id: str):
         )
     )
     await db_session.commit()
+    # Update Redis cache to match DB (prevents stale cache from prior get_balance calls)
+    if fake_redis is not None:
+        await fake_redis.setex(f"user_balance:{user_id}", 300, "10")
 
 
 async def _start_search(app_client, access_token):
@@ -477,7 +480,7 @@ async def test_ping_happy_path_complete_response(app_client, db_session):
 # ---------------------------------------------------------------------------
 
 
-async def test_ping_e2e_flow(app_client, db_session):
+async def test_ping_e2e_flow(app_client, db_session, fake_redis):
     """Full E2E: register → pair → ping (inactive) → start search → ping (active)."""
     # 1. Register
     reg = await _register(app_client, email="e2e@example.com")
@@ -494,8 +497,8 @@ async def test_ping_e2e_flow(app_client, db_session):
     assert resp1.json()["search"] is False
     assert resp1.json()["interval_seconds"] == 60
 
-    # 4. Start search
-    await _verify_email_in_db(db_session, reg["user_id"])
+    # 4. Start search (pass fake_redis so verify helper clears stale balance cache)
+    await _verify_email_in_db(db_session, reg["user_id"], fake_redis)
     await _start_search(app_client, reg["access_token"])
 
     # 5. Second ping — search active, 24h schedule → search=true

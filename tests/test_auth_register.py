@@ -1,11 +1,9 @@
-from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
-import pytest
 from sqlalchemy import select
 
 from app.models.credit_balance import CreditBalance
-from app.models.credit_transaction import CreditTransaction, TransactionType
+from app.models.credit_transaction import CreditTransaction
 from app.models.refresh_token import RefreshToken
 from app.models.search_filters import SearchFilters
 from app.models.search_status import SearchStatus
@@ -121,12 +119,12 @@ async def test_register_refresh_token_stored_hashed(app_client, db_session):
 
 
 # ---------------------------------------------------------------------------
-# Billing: CreditBalance created with registration bonus
+# Billing: CreditBalance created with zero balance (bonus deferred to verify-email)
 # ---------------------------------------------------------------------------
 
 
-async def test_register_creates_credit_balance_with_bonus(app_client, db_session):
-    """POST /auth/register creates CreditBalance with default bonus of 10 credits."""
+async def test_register_creates_credit_balance_with_zero(app_client, db_session):
+    """POST /auth/register creates CreditBalance with balance=0 (bonus after verify)."""
     response = await app_client.post(
         REGISTER_URL,
         json={"email": "credit-bal@example.com", "password": "securePass1"},
@@ -140,16 +138,16 @@ async def test_register_creates_credit_balance_with_bonus(app_client, db_session
     )
     cb = result.scalar_one_or_none()
     assert cb is not None
-    assert cb.balance == 10
+    assert cb.balance == 0
 
 
 # ---------------------------------------------------------------------------
-# Billing: CreditTransaction REGISTRATION_BONUS created
+# Billing: No CreditTransaction at registration (bonus deferred)
 # ---------------------------------------------------------------------------
 
 
-async def test_register_creates_registration_bonus_transaction(app_client, db_session):
-    """POST /auth/register creates REGISTRATION_BONUS CreditTransaction with correct fields."""
+async def test_register_no_bonus_transaction_before_verify(app_client, db_session):
+    """POST /auth/register does not create REGISTRATION_BONUS transaction (deferred)."""
     response = await app_client.post(
         REGISTER_URL,
         json={"email": "bonus-tx@example.com", "password": "securePass1"},
@@ -162,37 +160,7 @@ async def test_register_creates_registration_bonus_transaction(app_client, db_se
         select(CreditTransaction).where(CreditTransaction.user_id == user_id)
     )
     tx = result.scalar_one_or_none()
-    assert tx is not None
-    assert tx.type == TransactionType.REGISTRATION_BONUS
-    assert tx.amount == 10
-    assert tx.balance_after == 10
-    assert tx.reference_id is None
-
-
-# ---------------------------------------------------------------------------
-# Billing: Atomicity — credit creation failure prevents user creation
-# ---------------------------------------------------------------------------
-
-
-async def test_register_fails_when_credit_creation_fails(app_client):
-    """Register fails when create_balance_with_bonus raises.
-
-    The register endpoint uses a single commit() for User + SearchFilters +
-    SearchStatus + CreditBalance + CreditTransaction. If create_balance_with_bonus
-    raises before commit(), the exception propagates and nothing is persisted.
-    """
-    with (
-        patch(
-            "app.routers.auth.create_balance_with_bonus",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Simulated credit creation failure"),
-        ),
-        pytest.raises(Exception, match="Simulated credit creation failure"),
-    ):
-        await app_client.post(
-            REGISTER_URL,
-            json={"email": "rollback@example.com", "password": "securePass1"},
-        )
+    assert tx is None
 
 
 # ---------------------------------------------------------------------------
