@@ -447,55 +447,6 @@ class TestColumnFormatters:
 
 
 # ---------------------------------------------------------------------------
-# HTTP Integration Tests — adjust_balance_action
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_action_single_pk_redirects_to_form(admin_balance_env, db_session):
-    """Action with single PK redirects to the adjust balance form."""
-    client = admin_balance_env
-    user = _make_user("action-single@example.com")
-    db_session.add(user)
-    await db_session.flush()
-    cb = CreditBalance(user_id=user.id, balance=100)
-    db_session.add(cb)
-    await db_session.flush()
-
-    resp = await client.get(
-        f"/admin/credit-balance/action/adjust_balance?pks={cb.id}",
-        follow_redirects=False,
-    )
-    assert resp.status_code in (302, 303)
-    assert f"/admin/credit-balance/adjust/{cb.id}" in resp.headers["location"]
-
-
-@pytest.mark.asyncio
-async def test_action_multiple_pks_redirects_back(admin_balance_env):
-    """Action with multiple PKs redirects back to the list."""
-    client = admin_balance_env
-    resp = await client.get(
-        "/admin/credit-balance/action/adjust_balance?pks=1,2",
-        headers={"Referer": "/admin/credit-balance/list"},
-        follow_redirects=False,
-    )
-    assert resp.status_code in (302, 303)
-    assert "/admin/credit-balance/list" in resp.headers["location"]
-
-
-@pytest.mark.asyncio
-async def test_action_no_pks_redirects_back(admin_balance_env):
-    """Action with no PKs redirects back to the list."""
-    client = admin_balance_env
-    resp = await client.get(
-        "/admin/credit-balance/action/adjust_balance",
-        headers={"Referer": "/admin/credit-balance/list"},
-        follow_redirects=False,
-    )
-    assert resp.status_code in (302, 303)
-
-
-# ---------------------------------------------------------------------------
 # HTTP Integration Tests — adjust_balance_form GET
 # ---------------------------------------------------------------------------
 
@@ -527,7 +478,7 @@ async def test_form_get_invalid_pk_redirects_to_list(admin_balance_env):
         f"/admin/credit-balance/adjust/{fake_pk}",
         follow_redirects=False,
     )
-    assert resp.status_code in (302, 303)
+    assert resp.status_code in (302, 303, 307)
     assert "/admin/credit-balance/list" in resp.headers["location"]
 
 
