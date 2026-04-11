@@ -84,6 +84,12 @@ async def recover_order(order_id: UUID, db: AsyncSession, redis: Redis) -> bool:
     order_credits = order.credits_amount
     order_product_id = order.product_id
 
+    if order_user_id is None:
+        logger.warning(
+            "PURCHASE_RECOVERY_SKIP: order_id=%s has no user_id (soft-deleted)", order_id
+        )
+        return False
+
     # Atomic claim: CONSUMED -> VERIFIED (prevents double crediting)
     claim = await db.execute(
         update(PurchaseOrder)

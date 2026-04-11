@@ -40,6 +40,8 @@ from app.schemas.auth import (
 from app.schemas.pairing import SearchLoginRequest, SearchLoginResponse
 from app.services.auth_service import (
     blacklist_access_token,
+    check_account_lockout,
+    clear_login_attempts,
     create_access_token,
     create_refresh_token,
     delete_reset_code,
@@ -48,6 +50,7 @@ from app.services.auth_service import (
     get_user_by_phone,
     hash_password,
     hash_refresh_token,
+    record_failed_login,
     refresh_tokens,
     save_refresh_token,
     store_reset_code,
@@ -150,8 +153,15 @@ async def register(
 @router.post("/login", response_model=AuthResponse)
 @limiter.limit("10/minute")
 async def login(
-    request: Request, response: Response, body: LoginRequest, db: AsyncSession = Depends(get_db)
+    request: Request,
+    response: Response,
+    body: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
+    # Check account lockout before processing credentials
+    await check_account_lockout(redis, body.email)
+
     # Find user by email
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -161,11 +171,15 @@ async def login(
     client_ip = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "unknown")
     if not user or not password_valid:
+        await record_failed_login(redis, body.email)
         logger.warning(
             "Login failed: invalid credentials",
             extra={"email": body.email, "ip": client_ip, "user_agent": user_agent},
         )
         raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
+
+    # Clear lockout counter on successful login
+    await clear_login_attempts(redis, body.email)
 
     # Generate token pair
     access_token = create_access_token(user.id)

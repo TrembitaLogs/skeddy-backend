@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
-from fastapi import APIRouter, Depends, FastAPI, Query
+from fastapi import APIRouter, Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sqlalchemy import text
@@ -117,6 +117,7 @@ app.add_middleware(
         "X-Device-Token",
         "X-Language",
         "X-Request-ID",
+        "X-Admin-Secret",
     ],
 )
 app.add_middleware(
@@ -137,7 +138,7 @@ setup_rate_limiter(app)
 
 
 @app.get("/health")
-async def health_check(detail_key: str = Query("", alias="detail")):
+async def health_check(x_admin_secret: str = Header("", alias="X-Admin-Secret")):
     postgres_ok = False
     redis_ok = False
 
@@ -156,9 +157,11 @@ async def health_check(detail_key: str = Query("", alias="detail")):
 
     status = "ok" if postgres_ok and redis_ok else "degraded"
 
-    # Expose component-level details only when a valid detail key is provided
+    # Expose component-level details only when a valid admin secret header is provided
     show_details = bool(
-        settings.ADMIN_SECRET_KEY and detail_key and detail_key == settings.ADMIN_SECRET_KEY
+        settings.ADMIN_SECRET_KEY
+        and x_admin_secret
+        and x_admin_secret == settings.ADMIN_SECRET_KEY
     )
     if show_details:
         return {
