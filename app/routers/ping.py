@@ -131,6 +131,7 @@ async def ping(
     search_active, interval = await resolve_search_state(
         db=db,
         user_id=device.user_id,
+        device_id=device.id,
         redis=redis,
         configs=configs,
         filters=filters,
