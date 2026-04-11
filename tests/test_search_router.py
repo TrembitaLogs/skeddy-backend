@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.models.credit_balance import CreditBalance
+from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.paired_device import PairedDevice
 from app.models.user import User
 
@@ -51,10 +52,22 @@ def _device_headers(device_token: str, device_id: str) -> dict:
 
 
 async def _verify_email_in_db(db_session, user_id: str):
-    """Set email_verified=True for the given user directly in DB."""
-    result = await db_session.execute(select(User).where(User.id == UUID(user_id)))
+    """Set email_verified=True and grant registration bonus (mirrors verify-email endpoint)."""
+    uid = UUID(user_id)
+    result = await db_session.execute(select(User).where(User.id == uid))
     user = result.scalar_one()
     user.email_verified = True
+    cb_result = await db_session.execute(select(CreditBalance).where(CreditBalance.user_id == uid))
+    cb = cb_result.scalar_one()
+    cb.balance = 10
+    db_session.add(
+        CreditTransaction(
+            user_id=uid,
+            type=TransactionType.REGISTRATION_BONUS,
+            amount=10,
+            balance_after=10,
+        )
+    )
     await db_session.commit()
 
 
@@ -570,8 +583,8 @@ async def test_start_search_with_positive_balance_passes(app_client, db_session)
     assert response.json() == {"ok": True}
 
 
-async def test_start_search_balance_check_precedes_email_check(app_client, db_session, fake_redis):
-    """POST /search/start with balance=0 and unverified email -> INSUFFICIENT_CREDITS, not EMAIL_NOT_VERIFIED."""
+async def test_start_search_email_check_precedes_balance_check(app_client, db_session, fake_redis):
+    """POST /search/start with unverified email -> EMAIL_NOT_VERIFIED regardless of balance."""
     reg = await _register_and_get_tokens(app_client, email="precedence@example.com")
     # Don't verify email; set balance to 0
     await _set_balance_in_db(db_session, reg["user_id"], 0, fake_redis)
@@ -582,7 +595,7 @@ async def test_start_search_balance_check_precedes_email_check(app_client, db_se
     )
 
     assert response.status_code == 403
-    assert response.json()["error"]["code"] == "INSUFFICIENT_CREDITS"
+    assert response.json()["error"]["code"] == "EMAIL_NOT_VERIFIED"
 
 
 async def test_start_search_redis_cache_miss_falls_back_to_db(app_client, db_session, fake_redis):
@@ -608,9 +621,10 @@ async def test_start_search_redis_cache_miss_falls_back_to_db(app_client, db_ses
 # ===== credits_balance in GET /search/status (Task 7.2) =====
 
 
-async def test_status_includes_credits_balance(app_client):
-    """GET /search/status response includes credits_balance field (registration bonus)."""
+async def test_status_includes_credits_balance(app_client, db_session):
+    """GET /search/status response includes credits_balance field (after email verification)."""
     reg = await _register_and_get_tokens(app_client, email="cb_field@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
 
     response = await app_client.get(
         SEARCH_STATUS_URL,
@@ -620,7 +634,7 @@ async def test_status_includes_credits_balance(app_client):
     assert response.status_code == 200
     data = response.json()
     assert "credits_balance" in data
-    assert data["credits_balance"] == 10  # registration bonus
+    assert data["credits_balance"] == 10  # registration bonus (after verify)
 
 
 async def test_status_credits_balance_matches_actual_balance(app_client, db_session, fake_redis):
@@ -675,6 +689,7 @@ async def test_status_credits_balance_redis_miss_falls_back_to_db(
 ):
     """GET /search/status reads credits_balance from DB when Redis cache is empty."""
     reg = await _register_and_get_tokens(app_client, email="cb_dbfallback@example.com")
+    await _verify_email_in_db(db_session, reg["user_id"])
 
     # Clear Redis cache to force DB fallback
     cache_key = f"user_balance:{reg['user_id']}"
@@ -686,5 +701,5 @@ async def test_status_credits_balance_redis_miss_falls_back_to_db(
     )
 
     assert response.status_code == 200
-    # DB has registration bonus = 10
+    # DB has registration bonus = 10 (granted during email verification)
     assert response.json()["credits_balance"] == 10

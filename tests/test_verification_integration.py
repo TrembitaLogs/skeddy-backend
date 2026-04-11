@@ -61,9 +61,22 @@ async def _pair_device(app_client, email, device_id):
 
 
 async def _verify_email_in_db(db_session, user_id: str):
-    result = await db_session.execute(select(User).where(User.id == UUID(user_id)))
+    """Set email_verified=True and grant registration bonus (mirrors verify-email endpoint)."""
+    uid = UUID(user_id)
+    result = await db_session.execute(select(User).where(User.id == uid))
     user = result.scalar_one()
     user.email_verified = True
+    cb_result = await db_session.execute(select(CreditBalance).where(CreditBalance.user_id == uid))
+    cb = cb_result.scalar_one()
+    cb.balance = 10
+    db_session.add(
+        CreditTransaction(
+            user_id=uid,
+            type=TransactionType.REGISTRATION_BONUS,
+            amount=10,
+            balance_after=10,
+        )
+    )
     await db_session.commit()
 
 
