@@ -116,11 +116,11 @@ async def test_polymorphic_reference_ride_charge(db_session):
     assert loaded.amount == -2
 
 
-# --- Test strategy item 4: CASCADE delete — deleting User removes transactions ---
+# --- Test strategy item 4: SET NULL on user deletion — transactions preserved ---
 
 
-async def test_cascade_delete_on_user_removal(db_session):
-    """Deleting a User automatically deletes all associated CreditTransactions."""
+async def test_soft_delete_sets_null_on_user_removal(db_session):
+    """Deleting a User sets user_id to NULL on associated CreditTransactions (SET NULL FK)."""
     user = _make_user()
     db_session.add(user)
     await db_session.flush()
@@ -140,10 +140,16 @@ async def test_cascade_delete_on_user_removal(db_session):
     await db_session.delete(user)
     await db_session.flush()
 
+    # Expire cached objects so re-query picks up DB-level SET NULL
+    db_session.expire_all()
+
     result = await db_session.execute(
         select(CreditTransaction).where(CreditTransaction.id.in_([tx1_id, tx2_id]))
     )
-    assert result.scalars().all() == []
+    orphaned = result.scalars().all()
+    assert len(orphaned) == 2
+    for tx in orphaned:
+        assert tx.user_id is None
 
 
 # --- Test strategy item 5: application-level validation — invalid type string ---

@@ -47,10 +47,10 @@ class PurchaseOrder(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
     )
     google_order_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     product_id: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -63,5 +63,6 @@ class PurchaseOrder(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="purchase_orders")
