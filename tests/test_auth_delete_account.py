@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.models.accept_failure import AcceptFailure
 from app.models.credit_balance import CreditBalance
-from app.models.credit_transaction import CreditTransaction
+from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.paired_device import PairedDevice
 from app.models.purchase_order import PurchaseOrder
 from app.models.refresh_token import RefreshToken
@@ -114,9 +114,16 @@ async def test_delete_account_cascades_all_related_data(app_client, db_session):
     user_id = UUID(reg["user_id"])
 
     # Registration auto-creates: RefreshToken, SearchFilters, SearchStatus,
-    # CreditBalance, CreditTransaction (REGISTRATION_BONUS).
-    # Manually create the remaining related entities: PairedDevice, Ride,
-    # AcceptFailure, PurchaseOrder.
+    # CreditBalance (balance=0, bonus deferred to verify-email).
+    # Manually create CreditTransaction and remaining related entities.
+    db_session.add(
+        CreditTransaction(
+            user_id=user_id,
+            type=TransactionType.REGISTRATION_BONUS,
+            amount=10,
+            balance_after=10,
+        )
+    )
     device = PairedDevice(
         user_id=user_id,
         device_id="cascade-test-device",
