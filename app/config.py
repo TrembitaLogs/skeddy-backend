@@ -117,9 +117,23 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _warn_missing_production_settings(self) -> "Settings":
         """Log warnings for settings that should be set in production."""
+        _logger = logging.getLogger(__name__)
+
+        # JWT_SECRET safety checks (all environments)
+        _default_secret = "your-super-secret-key-change-in-production"
+        if _default_secret == self.JWT_SECRET or "change" in self.JWT_SECRET.lower():
+            _logger.warning(
+                "JWT_SECRET appears to be a default/placeholder value — "
+                "set a strong random secret before deploying"
+            )
+
         if self.ENVIRONMENT == "dev":
             return self
-        _logger = logging.getLogger(__name__)
+
+        # Production/staging: enforce minimum JWT_SECRET length
+        if len(self.JWT_SECRET) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters in production/staging")
+
         if not self.ADMIN_PASSWORD:
             _logger.warning("ADMIN_PASSWORD is not set — admin panel login is disabled")
         if not self.ADMIN_SECRET_KEY or len(self.ADMIN_SECRET_KEY) < 32:
