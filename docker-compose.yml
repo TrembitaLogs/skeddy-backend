@@ -27,7 +27,9 @@ services:
   redis:
     image: redis:8-alpine
     container_name: skeddy-redis
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     volumes:
       - redisdata:/data
     healthcheck:
@@ -51,7 +53,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://skeddy:${DB_PASSWORD}@db:5432/skeddy
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     volumes:
       - backupdata:/backups
     expose:
