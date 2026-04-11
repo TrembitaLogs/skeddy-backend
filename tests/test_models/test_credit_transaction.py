@@ -116,7 +116,7 @@ async def test_polymorphic_reference_ride_charge(db_session):
     assert loaded.amount == -2
 
 
-# --- Test strategy item 4: CASCADE delete — deleting User removes transactions ---
+# --- Test strategy item 4: SET NULL on user deletion — transactions preserved ---
 
 
 async def test_soft_delete_sets_null_on_user_removal(db_session):
@@ -139,6 +139,9 @@ async def test_soft_delete_sets_null_on_user_removal(db_session):
 
     await db_session.delete(user)
     await db_session.flush()
+
+    # Expire cached objects so re-query picks up DB-level SET NULL
+    db_session.expire_all()
 
     result = await db_session.execute(
         select(CreditTransaction).where(CreditTransaction.id.in_([tx1_id, tx2_id]))
