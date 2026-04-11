@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import jwt
 import pytest
@@ -83,10 +83,11 @@ def test_decode_access_token_invalid_returns_none():
     assert decode_access_token("not-a-valid-token") is None
 
 
-def test_create_refresh_token_returns_uuid_v4():
+def test_create_refresh_token_returns_urlsafe_string():
     token = create_refresh_token()
-    parsed = UUID(token, version=4)
-    assert str(parsed) == token
+    # secrets.token_urlsafe(32) produces ~43 base64url chars
+    assert len(token) > 36
+    assert isinstance(token, str)
 
 
 # --- Refresh token hash & DB tests ---
