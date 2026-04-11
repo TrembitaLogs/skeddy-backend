@@ -166,6 +166,11 @@ async def test_cleanup_loop_calls_delete():
             return_value=5,
         ) as mock_delete,
         patch(
+            "app.tasks.token_cleanup.delete_expired_device_tokens",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
             "app.tasks.token_cleanup.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep,
@@ -241,6 +246,11 @@ async def test_cleanup_uses_correct_interval():
         ),
         patch(
             "app.tasks.token_cleanup.delete_expired_refresh_tokens",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
+        patch(
+            "app.tasks.token_cleanup.delete_expired_device_tokens",
             new_callable=AsyncMock,
             return_value=0,
         ),
