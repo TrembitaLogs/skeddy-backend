@@ -57,7 +57,7 @@ from app.services.auth_service import (
     verify_verify_code,
 )
 from app.services.config_service import get_registration_bonus_credits
-from app.services.credit_service import add_credits
+from app.services.credit_service import add_credits, cache_balance
 from app.services.email_service import (
     send_email_change_code,
     send_password_reset_code,
@@ -259,12 +259,14 @@ async def verify_email(
             raise HTTPException(status_code=409, detail="EMAIL_ALREADY_EXISTS")
         logger.info("Email changed for user %s to %s", current_user.id, pending_email)
     else:
-        # Initial verification flow
+        # Initial verification flow — single atomic transaction for
+        # email_verified + registration bonus (prevents orphaned state
+        # where email is verified but bonus is missing with no recovery path).
         current_user.email_verified = True
-        await db.commit()
-        logger.info("Email verified for user %s", current_user.id)
+        await db.flush()
 
         # Grant registration bonus now that email is verified (S-04 fix)
+        new_balance: int | None = None
         existing_bonus = await db.execute(
             select(CreditTransaction.id)
             .where(
@@ -274,14 +276,22 @@ async def verify_email(
             .limit(1)
         )
         if existing_bonus.scalar_one_or_none() is None:
-            await add_credits(
+            new_balance = await add_credits(
                 user_id=current_user.id,
                 amount=await get_registration_bonus_credits(db, redis),
                 tx_type=TransactionType.REGISTRATION_BONUS,
                 reference_id=None,
                 db=db,
                 redis=redis,
+                commit=False,
             )
+
+        await db.commit()
+        logger.info("Email verified for user %s", current_user.id)
+
+        # Update Redis cache after successful commit
+        if new_balance is not None:
+            await cache_balance(current_user.id, new_balance, redis)
 
     # Delete used code from Redis
     await delete_verify_code(redis, str(current_user.id))
