@@ -77,6 +77,7 @@ async def handle_force_update(
 async def resolve_search_state(
     db: AsyncSession,
     user_id: UUID,
+    device_id: UUID,
     redis: Redis,
     configs: PingConfigs,
     filters: SearchFilters,
@@ -104,7 +105,7 @@ async def resolve_search_state(
 
     # Cluster gate — coordinate search among clustered devices
     cluster_result = await cluster_gate(
-        device_id=str(user_id),
+        device_id=str(device_id),
         redis=redis,
         clustering_enabled=configs.clustering_enabled,
     )
