@@ -17,8 +17,8 @@ def _admin_secret(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_health_returns_status_only_without_detail_key(app_client):
-    """GET /health without detail key returns only status field."""
+async def test_health_returns_status_only_without_admin_header(app_client):
+    """GET /health without X-Admin-Secret header returns only status field."""
     response = await app_client.get(HEALTH_URL)
     assert response.status_code == 200
     data = response.json()
