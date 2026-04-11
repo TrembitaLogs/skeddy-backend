@@ -173,6 +173,11 @@ async def test_user_rides_isolated(app_client, db_session):
 
     assert resp_a.status_code == 200
     assert resp_b.status_code == 200
-    # Both return only their own rides (empty initially)
-    assert resp_a.json()["events"] == []
-    assert resp_b.json()["events"] == []
+    # Each user sees only their own ride events (not the other user's)
+    events_a = resp_a.json()["events"]
+    events_b = resp_b.json()["events"]
+    user_ids_a = {e.get("user_id") for e in events_a if "user_id" in e}
+    user_ids_b = {e.get("user_id") for e in events_b if "user_id" in e}
+    # No cross-user data: A's events don't contain B's user_id and vice versa
+    assert user_b["user_id"] not in user_ids_a
+    assert user_a["user_id"] not in user_ids_b

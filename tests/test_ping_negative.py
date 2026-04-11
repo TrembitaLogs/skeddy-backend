@@ -168,15 +168,15 @@ async def test_ping_db_error_during_commit(app_client):
 
 @pytest.mark.asyncio
 async def test_ping_very_long_app_version(app_client):
-    """POST /ping with extremely long app_version triggers DB or validation error."""
+    """POST /ping with extremely long app_version triggers DB truncation error."""
     headers = await _setup_device(app_client, "long-ver@example.com", "long-ver-dev")
     resp = await app_client.post(
         PING_URL,
         json=_ping_body(app_version="x" * 1000),
         headers=headers,
     )
-    # DB varchar(20) truncation or validation error
-    assert resp.status_code in (200, 422, 500)
+    # DB varchar(20) column causes StringDataRightTruncationError → 500
+    assert resp.status_code == 500
 
 
 @pytest.mark.asyncio
