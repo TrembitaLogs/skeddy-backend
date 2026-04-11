@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     VERIFY_CODE_TTL: int = 1800  # 30 minutes
     VERIFY_CODE_MAX_ATTEMPTS: int = 5
 
+    # Device token expiry (days)
+    DEVICE_TOKEN_EXPIRE_DAYS: int = 90
+
     # Rate limiter fallback (in-memory, when Redis is down)
     RATE_LIMIT_FALLBACK_WINDOW_SECONDS: int = 60
     RATE_LIMIT_FALLBACK_MAX_REQUESTS: int = 30

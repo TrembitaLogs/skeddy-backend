@@ -62,7 +62,7 @@ class PingRequest(BaseModel):
     device_health: DeviceHealth | None = None
     stats: PingStats | None = None
     last_cycle_duration_ms: int | None = None
-    ride_statuses: list[RideStatusReport] | None = None
+    ride_statuses: list[RideStatusReport] | None = Field(default=None, max_length=100)
     location: DeviceLocation | None = None
 
 
