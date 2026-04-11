@@ -1,11 +1,7 @@
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
-from firebase_admin import exceptions as firebase_exceptions
 from redis.asyncio import Redis
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -15,23 +11,21 @@ from app.middleware.rate_limiter import get_device_key, limiter
 from app.models.paired_device import PairedDevice
 from app.redis import get_redis
 from app.schemas.ping import PingFiltersResponse, PingRequest, PingResponse, VerifyRideItem
-from app.services.cluster_service import cluster_gate
 from app.services.config_service import batch_get_ping_configs
-from app.services.credit_service import cache_balance, get_balance
-from app.services.fcm_service import send_ride_credit_refunded, send_search_update_required
+from app.services.credit_service import get_balance
 from app.services.filter_service import get_user_filters
 from app.services.ping_service import (
     build_verify_rides,
-    calculate_dynamic_interval,
     check_app_version,
-    is_within_schedule,
+    handle_force_update,
     process_expired_verifications,
     process_ride_status_reports,
     process_stats_if_new,
+    resolve_search_state,
     save_accept_failures,
+    send_refund_notifications,
     update_device_state,
 )
-from app.services.search_service import get_search_status
 
 logger = logging.getLogger(__name__)
 
@@ -83,24 +77,7 @@ async def ping(
     await db.commit()
 
     # Update Redis balance cache and send FCM pushes after successful commit.
-    if cancelled_rides:
-        last_balance = cancelled_rides[-1]["new_balance"]
-        await cache_balance(device.user_id, last_balance, redis)
-        for refund_info in cancelled_rides:
-            try:
-                await send_ride_credit_refunded(
-                    db,
-                    device.user_id,
-                    refund_info["ride_id"],
-                    refund_info["credits_refunded"],
-                    refund_info["new_balance"],
-                )
-            except (firebase_exceptions.FirebaseError, OperationalError):
-                logger.warning(
-                    "FCM RIDE_CREDIT_REFUNDED failed in ping handler for ride %s",
-                    refund_info["ride_id"],
-                    exc_info=True,
-                )
+    await send_refund_notifications(db, device.user_id, redis, cancelled_rides)
 
     # Load filters — needed in ALL response paths per API contract.
     filters = await get_user_filters(db, device.user_id)
@@ -115,12 +92,7 @@ async def ping(
         device.last_interval_sent = settings.PING_INTERVAL_FORCE_UPDATE
         await db.commit()
 
-        # Notify main app once per hour that search app needs update.
-        notified_key = f"search_update_notified:{device.user_id}"
-        already_notified = await redis.get(notified_key)
-        if not already_notified:
-            await redis.setex(notified_key, 3600, "1")
-            await send_search_update_required(db, device.user_id, configs.min_search_version)
+        await handle_force_update(db, device.user_id, redis, configs.min_search_version)
 
         return PingResponse(
             search=False,
@@ -155,35 +127,17 @@ async def ping(
             verify_rides=verify_rides,
         )
 
-    # 9. Determine search state: is_active AND within schedule.
-    search_status = await get_search_status(db, device.user_id)
-    search_active = search_status.is_active and is_within_schedule(filters, body.timezone)
-
-    # 10. Calculate interval, save to device, return response.
-    if not search_active:
-        interval = settings.PING_INTERVAL_INACTIVE
-    else:
-        if configs.search_interval_config is not None:
-            rpd, rph = configs.search_interval_config
-            tz = ZoneInfo(body.timezone)
-            local_hour = datetime.now(tz).hour
-            interval = calculate_dynamic_interval(
-                rpd, rph, local_hour, body.last_cycle_duration_ms
-            )
-        else:
-            interval = settings.DEFAULT_SEARCH_INTERVAL_SECONDS
-
-        # 11. Cluster gate — coordinate search among clustered devices.
-        # Only runs when search_active=True. cluster_gate returns None for
-        # solo devices or when clustering is disabled (existing logic applies).
-        cluster_result = await cluster_gate(
-            device_id=str(device.id),
-            redis=redis,
-            clustering_enabled=configs.clustering_enabled,
-        )
-        if cluster_result is not None:
-            search_active = cluster_result["search"]
-            interval = cluster_result["interval_seconds"]
+    # 9-10. Determine search state and calculate interval.
+    search_active, interval = await resolve_search_state(
+        db=db,
+        user_id=device.user_id,
+        device_id=device.id,
+        redis=redis,
+        configs=configs,
+        filters=filters,
+        timezone_str=body.timezone,
+        last_cycle_duration_ms=body.last_cycle_duration_ms,
+    )
 
     device.last_interval_sent = interval
     await db.commit()
