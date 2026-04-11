@@ -153,7 +153,7 @@ async def health_check(x_admin_secret: str = Header("", alias="X-Admin-Secret"))
         logger.warning("Health check: PostgreSQL unavailable", exc_info=True)
 
     try:
-        await redis_mod.redis_client.ping()
+        await redis_mod.redis_client.ping()  # type: ignore[misc]
         redis_ok = True
     except Exception:
         logger.warning("Health check: Redis unavailable", exc_info=True)
