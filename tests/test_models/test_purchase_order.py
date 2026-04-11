@@ -115,6 +115,9 @@ async def test_soft_delete_sets_null_on_user_removal(db_session):
     await db_session.delete(user)
     await db_session.flush()
 
+    # Expire cached objects so re-query picks up DB-level SET NULL
+    db_session.expire_all()
+
     result = await db_session.execute(select(PurchaseOrder).where(PurchaseOrder.id == order_id))
     orphaned = result.scalar_one_or_none()
     assert orphaned is not None
