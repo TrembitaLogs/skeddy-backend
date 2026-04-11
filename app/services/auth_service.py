@@ -23,6 +23,67 @@ logger = logging.getLogger(__name__)
 
 _ROUNDS = 12
 
+# --- Account lockout Redis key schema ---
+# login_attempts:{email} → string counter
+_LOGIN_ATTEMPTS_PREFIX = "login_attempts:"
+_LOCKOUT_THRESHOLDS = [
+    (5, 900),  # 5 failed attempts → 15 min lockout
+    (10, 3600),  # 10 failed attempts → 1 hour lockout
+]
+_LOCKOUT_COUNTER_TTL = 3600  # Counter expires after 1 hour of no activity
+
+
+async def check_account_lockout(redis: Redis, email: str) -> None:
+    """Check if account is locked out due to failed login attempts.
+
+    Raises HTTPException(429) if locked.
+    """
+    key = f"{_LOGIN_ATTEMPTS_PREFIX}{email}"
+    try:
+        raw = await redis.get(key)
+    except RedisError:
+        logger.warning("Redis unavailable for lockout check, allowing login")
+        return
+
+    if raw is None:
+        return
+
+    attempts = int(raw)
+    for threshold, _lockout_seconds in reversed(_LOCKOUT_THRESHOLDS):
+        if attempts >= threshold:
+            ttl = await redis.ttl(key)
+            if ttl > 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail="ACCOUNT_LOCKED",
+                )
+            break
+
+
+async def record_failed_login(redis: Redis, email: str) -> None:
+    """Increment failed login counter and set TTL based on threshold."""
+    key = f"{_LOGIN_ATTEMPTS_PREFIX}{email}"
+    try:
+        attempts = await redis.incr(key)
+        # Apply the longest matching lockout TTL
+        lockout_ttl = _LOCKOUT_COUNTER_TTL
+        for threshold, ttl in _LOCKOUT_THRESHOLDS:
+            if attempts >= threshold:
+                lockout_ttl = ttl
+        await redis.expire(key, lockout_ttl)
+    except RedisError:
+        logger.warning("Redis unavailable for login attempt tracking")
+
+
+async def clear_login_attempts(redis: Redis, email: str) -> None:
+    """Clear failed login counter on successful login."""
+    key = f"{_LOGIN_ATTEMPTS_PREFIX}{email}"
+    try:
+        await redis.delete(key)
+    except RedisError:
+        logger.warning("Redis unavailable for clearing login attempts")
+
+
 # --- Password reset code Redis key schema (code-based) ---
 # reset_code:{email} → JSON {"code_hash": "sha256...", "attempts": 0}
 _RESET_CODE_PREFIX = "reset_code:"

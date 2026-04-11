@@ -60,11 +60,9 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     credit_transactions = relationship(
-        "CreditTransaction", back_populates="user", cascade="all, delete-orphan"
+        "CreditTransaction", back_populates="user", passive_deletes=True
     )
-    purchase_orders = relationship(
-        "PurchaseOrder", back_populates="user", cascade="all, delete-orphan"
-    )
+    purchase_orders = relationship("PurchaseOrder", back_populates="user", passive_deletes=True)
 
     def __str__(self) -> str:
         return self.email
