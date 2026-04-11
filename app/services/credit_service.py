@@ -212,6 +212,8 @@ async def add_credits(
     db: AsyncSession,
     redis: Redis,
     description: str | None = None,
+    *,
+    commit: bool = True,
 ) -> int:
     """Add credits to user balance (purchases, admin adjustments, refunds).
 
@@ -219,8 +221,9 @@ async def add_credits(
     acceptable latency for infrequent operations like purchases and
     admin adjustments.
 
-    Writes through to Redis cache after successful DB commit.
-    Clears low_balance_notified flag when new balance reaches threshold.
+    When commit=True (default), commits and writes through to Redis cache.
+    When commit=False, flushes only — caller is responsible for commit
+    and cache update (useful for multi-step atomic transactions).
 
     Returns new_balance.
     Raises HTTPException(503) on statement timeout.
@@ -254,8 +257,11 @@ async def add_credits(
         )
     )
 
-    await db.commit()
-    await cache_balance(user_id, new_balance, redis)
+    if commit:
+        await db.commit()
+        await cache_balance(user_id, new_balance, redis)
+    else:
+        await db.flush()
 
     # Clear low_balance_notified ONLY if new_balance >= threshold (PRD section 8)
     try:
