@@ -16,6 +16,7 @@ from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.redis import require_redis
 from app.middleware.rate_limiter import get_user_key, limiter
+from app.models.credit_balance import CreditBalance
 from app.models.credit_transaction import CreditTransaction, TransactionType
 from app.models.refresh_token import RefreshToken
 from app.models.search_filters import SearchFilters
@@ -55,7 +56,11 @@ from app.services.auth_service import (
     verify_reset_code,
     verify_verify_code,
 )
-from app.services.credit_service import cache_balance, create_balance_with_bonus
+from app.services.config_service import get_registration_bonus_credits
+from app.services.credit_service import (
+    add_credits,
+    cache_balance,
+)
 from app.services.email_service import (
     send_email_change_code,
     send_password_reset_code,
@@ -112,8 +117,9 @@ async def register(
     search_status = SearchStatus(user_id=user.id)
     db.add_all([search_filters, search_status])
 
-    # Create credit balance with registration bonus (flush only, no commit)
-    credit_balance = await create_balance_with_bonus(user.id, db, redis)
+    # Create credit balance with zero balance (bonus granted after email verification)
+    credit_balance = CreditBalance(user_id=user.id, balance=0)
+    db.add(credit_balance)
 
     # Generate tokens
     access_token = create_access_token(user.id)
@@ -133,8 +139,8 @@ async def register(
         detail = "PHONE_ALREADY_EXISTS" if "phone_number" in str(exc) else "EMAIL_ALREADY_EXISTS"
         raise HTTPException(status_code=409, detail=detail)
 
-    # Write-through Redis cache for credit balance (after commit per PRD)
-    await cache_balance(user.id, credit_balance.balance, redis)
+    # Write-through Redis cache for zero balance (after commit per PRD)
+    await cache_balance(user.id, 0, redis)
 
     # Send verification email (failure must not break registration)
     code = generate_six_digit_code()
@@ -263,6 +269,25 @@ async def verify_email(
         current_user.email_verified = True
         await db.commit()
         logger.info("Email verified for user %s", current_user.id)
+
+        # Grant registration bonus now that email is verified (S-04 fix)
+        existing_bonus = await db.execute(
+            select(CreditTransaction.id)
+            .where(
+                CreditTransaction.user_id == current_user.id,
+                CreditTransaction.type == TransactionType.REGISTRATION_BONUS,
+            )
+            .limit(1)
+        )
+        if existing_bonus.scalar_one_or_none() is None:
+            await add_credits(
+                user_id=current_user.id,
+                amount=await get_registration_bonus_credits(db, redis),
+                tx_type=TransactionType.REGISTRATION_BONUS,
+                reference_id=None,
+                db=db,
+                redis=redis,
+            )
 
     # Delete used code from Redis
     await delete_verify_code(redis, str(current_user.id))

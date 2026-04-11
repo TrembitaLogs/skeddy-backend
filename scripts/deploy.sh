@@ -10,6 +10,11 @@ HEALTH_INTERVAL=2
 
 echo "==> Deploying ${FULL_IMAGE}"
 
+# --- 0. Secure .env file permissions ---
+if [ -f .env ]; then
+  chmod 600 .env
+fi
+
 # --- 1. Login to GHCR ---
 echo "==> Logging in to GHCR..."
 echo "${CR_PAT}" | docker login ghcr.io -u "${CR_USER}" --password-stdin

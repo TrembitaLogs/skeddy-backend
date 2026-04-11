@@ -71,7 +71,9 @@ jobs:
           mkdir -p ~/.ssh
           echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          rsync -avz --relative -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key" \
+          echo "${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          rsync -avz --relative -e "ssh -i ~/.ssh/deploy_key" \
             docker-compose.yml docker-compose.prod.yml scripts/deploy.sh \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/skeddy-backend/
           rm -f ~/.ssh/deploy_key
