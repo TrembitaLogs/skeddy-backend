@@ -57,10 +57,7 @@ from app.services.auth_service import (
     verify_verify_code,
 )
 from app.services.config_service import get_registration_bonus_credits
-from app.services.credit_service import (
-    add_credits,
-    cache_balance,
-)
+from app.services.credit_service import add_credits
 from app.services.email_service import (
     send_email_change_code,
     send_password_reset_code,
@@ -138,9 +135,6 @@ async def register(
         await db.rollback()
         detail = "PHONE_ALREADY_EXISTS" if "phone_number" in str(exc) else "EMAIL_ALREADY_EXISTS"
         raise HTTPException(status_code=409, detail=detail)
-
-    # Write-through Redis cache for zero balance (after commit per PRD)
-    await cache_balance(user.id, 0, redis)
 
     # Send verification email (failure must not break registration)
     code = generate_six_digit_code()
