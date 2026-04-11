@@ -583,8 +583,8 @@ async def test_start_search_with_positive_balance_passes(app_client, db_session)
     assert response.json() == {"ok": True}
 
 
-async def test_start_search_balance_check_precedes_email_check(app_client, db_session, fake_redis):
-    """POST /search/start with balance=0 and unverified email -> INSUFFICIENT_CREDITS, not EMAIL_NOT_VERIFIED."""
+async def test_start_search_email_check_precedes_balance_check(app_client, db_session, fake_redis):
+    """POST /search/start with unverified email -> EMAIL_NOT_VERIFIED regardless of balance."""
     reg = await _register_and_get_tokens(app_client, email="precedence@example.com")
     # Don't verify email; set balance to 0
     await _set_balance_in_db(db_session, reg["user_id"], 0, fake_redis)
@@ -595,7 +595,7 @@ async def test_start_search_balance_check_precedes_email_check(app_client, db_se
     )
 
     assert response.status_code == 403
-    assert response.json()["error"]["code"] == "INSUFFICIENT_CREDITS"
+    assert response.json()["error"]["code"] == "EMAIL_NOT_VERIFIED"
 
 
 async def test_start_search_redis_cache_miss_falls_back_to_db(app_client, db_session, fake_redis):

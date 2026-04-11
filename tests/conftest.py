@@ -1,10 +1,12 @@
 import asyncio
 import types
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -14,6 +16,9 @@ from app.database import Base, get_db
 from app.database import engine as app_engine
 from app.main import app
 from app.middleware.rate_limiter import limiter
+from app.models.credit_balance import CreditBalance
+from app.models.credit_transaction import CreditTransaction, TransactionType
+from app.models.user import User
 from app.redis import get_redis
 
 
@@ -217,8 +222,8 @@ async def app_client(db_session, fake_redis):
 
 
 @pytest_asyncio.fixture
-async def authenticated_client(app_client):
-    """Register a test user and provide an authenticated client context.
+async def authenticated_client(app_client, db_session):
+    """Register a test user, verify email, grant bonus, and provide an authenticated client.
 
     Returns a SimpleNamespace with:
         .client       - httpx AsyncClient (same as app_client)
@@ -233,6 +238,25 @@ async def authenticated_client(app_client):
     )
     assert resp.status_code == 201
     data = resp.json()
+
+    # Verify email and grant registration bonus (mirrors verify-email endpoint)
+    uid = UUID(data["user_id"])
+    result = await db_session.execute(select(User).where(User.id == uid))
+    user = result.scalar_one()
+    user.email_verified = True
+    cb_result = await db_session.execute(select(CreditBalance).where(CreditBalance.user_id == uid))
+    cb = cb_result.scalar_one()
+    cb.balance = 10
+    db_session.add(
+        CreditTransaction(
+            user_id=uid,
+            type=TransactionType.REGISTRATION_BONUS,
+            amount=10,
+            balance_after=10,
+        )
+    )
+    await db_session.commit()
+
     return types.SimpleNamespace(
         client=app_client,
         headers={"Authorization": f"Bearer {data['access_token']}"},
