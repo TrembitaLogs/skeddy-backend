@@ -97,11 +97,11 @@ def test_invalid_status_raises_value_error():
         PurchaseStatus("INVALID_STATUS")
 
 
-# --- Test strategy item 5: CASCADE delete — deleting User removes PurchaseOrder ---
+# --- Test strategy item 5: SET NULL on user deletion — PurchaseOrder preserved ---
 
 
-async def test_cascade_delete_on_user_removal(db_session):
-    """Deleting a User automatically deletes associated PurchaseOrders."""
+async def test_soft_delete_sets_null_on_user_removal(db_session):
+    """Deleting a User sets user_id to NULL on associated PurchaseOrders (SET NULL FK)."""
     user = _make_user()
     db_session.add(user)
     await db_session.flush()
@@ -116,7 +116,9 @@ async def test_cascade_delete_on_user_removal(db_session):
     await db_session.flush()
 
     result = await db_session.execute(select(PurchaseOrder).where(PurchaseOrder.id == order_id))
-    assert result.scalar_one_or_none() is None
+    orphaned = result.scalar_one_or_none()
+    assert orphaned is not None
+    assert orphaned.user_id is None
 
 
 # --- Additional: google_order_id allows multiple NULLs (UNIQUE ignores NULLs in PG) ---
