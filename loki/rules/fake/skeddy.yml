@@ -30,7 +30,7 @@ groups:
           description: '{{ $value }} matching line(s) in the last minute. Pattern: fatal|critical|panic|unhandled exception'
           loki_query: '{container="{{ $labels.container }}"} |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b"'
           grafana_url: |-
-            {{- $q := printf `{container="%s"} |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b"` $labels.container -}}
+            {{- $q := printf `{container="%s"}` $labels.container -}}
             https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-30m","to":"now"}}` $q | urlquery }}
 
       # Sustained error rate from the app — likely regression, not a one-off.
@@ -49,7 +49,7 @@ groups:
           description: 'Current rate: {{ printf "%.2f" $value }} errors/s'
           loki_query: '{container="skeddy-app"} |~ "(?i)\\b(error|exception|traceback)\\b"'
           grafana_url: |-
-            {{- $q := `{container="skeddy-app"} |~ "(?i)\\b(error|exception|traceback)\\b"` -}}
+            {{- $q := `{container="skeddy-app"}` -}}
             https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-1h","to":"now"}}` $q | urlquery }}
 
       # Postgres spitting FATAL/ERROR — could be auth, disk, or query failures.
@@ -67,7 +67,7 @@ groups:
           description: '{{ $value }} ERROR/FATAL lines detected'
           loki_query: '{container="skeddy-db"} |~ "^[0-9-]+ [0-9:.]+ UTC \\[[0-9]+\\] (FATAL|ERROR)"'
           grafana_url: |-
-            {{- $q := `{container="skeddy-db"} |~ "^[0-9-]+ [0-9:.]+ UTC \\[[0-9]+\\] (FATAL|ERROR)"` -}}
+            {{- $q := `{container="skeddy-db"}` -}}
             https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-1h","to":"now"}}` $q | urlquery }}
 
       # Backup script reports failure. Runs every 30m; 1h window catches two attempts.
@@ -83,5 +83,5 @@ groups:
           description: '{{ $value }} failure line(s) in backup output'
           loki_query: '{container="skeddy-backup"} |~ "(?i)(failed|error)"'
           grafana_url: |-
-            {{- $q := `{container="skeddy-backup"} |~ "(?i)(failed|error)"` -}}
+            {{- $q := `{container="skeddy-backup"}` -}}
             https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-2h","to":"now"}}` $q | urlquery }}

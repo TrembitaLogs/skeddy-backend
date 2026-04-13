@@ -35,16 +35,17 @@ def html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def fetch_logs(query: str) -> list[tuple[str, str]]:
-    end_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
-    start_ns = end_ns - LOOKBACK_MINUTES * 60 * 1_000_000_000
+def query_loki(
+    query: str, start_ns: int, end_ns: int, limit: int, direction: str = "backward"
+) -> list[tuple[int, str]]:
+    """Returns raw [(ts_ns, line), ...] from Loki, no sorting."""
     params = urllib.parse.urlencode(
         {
             "query": query,
             "start": str(start_ns),
             "end": str(end_ns),
-            "limit": str(MAX_LINES),
-            "direction": "backward",
+            "limit": str(limit),
+            "direction": direction,
         }
     )
     url = f"{LOKI_URL}/loki/api/v1/query_range?{params}"
@@ -54,14 +55,21 @@ def fetch_logs(query: str) -> list[tuple[str, str]]:
     except Exception as exc:
         log.warning("loki query failed for %r: %s", query, exc)
         return []
-
     rows: list[tuple[int, str]] = []
     for stream in data.get("data", {}).get("result", []):
         for ts_ns_str, line in stream.get("values", []):
             rows.append((int(ts_ns_str), line))
+    return rows
+
+
+def fetch_matches(match_query: str) -> list[tuple[str, str]]:
+    """Returns up to MAX_LINES matching lines, oldest first."""
+    end_ns = int(datetime.now(UTC).timestamp() * 1_000_000_000)
+    start_ns = end_ns - LOOKBACK_MINUTES * 60 * 1_000_000_000
+    rows = query_loki(match_query, start_ns, end_ns, limit=MAX_LINES)
     rows.sort()
     return [
-        (datetime.fromtimestamp(ts / 1e9, tz=UTC).strftime("%Y-%m-%d %H:%M:%S"), line)
+        (datetime.fromtimestamp(ts / 1e9, tz=UTC).strftime("%H:%M:%S"), line)
         for ts, line in rows[-MAX_LINES:]
     ]
 
@@ -80,14 +88,13 @@ def format_message(alert: dict) -> str:
     if status == "firing":
         query = annotations.get("loki_query")
         if query:
-            lines = fetch_logs(query)
-            if lines:
-                body = "\n".join(f"{ts}  {line}" for ts, line in lines)
-                # Reserve room for the closing tags + Grafana link.
-                if len(body) > TELEGRAM_MAX - 200:
-                    body = body[-(TELEGRAM_MAX - 200) :]
-                    body = "…\n" + body[body.find("\n") + 1 :]
-                parts.append(f"<pre>{html_escape(body)}</pre>")
+            matches = fetch_matches(query)
+            if matches:
+                rendered = "\n".join(f"{ts}  {line}" for ts, line in matches)
+                if len(rendered) > TELEGRAM_MAX - 200:
+                    rendered = rendered[-(TELEGRAM_MAX - 200) :]
+                    rendered = "…\n" + rendered[rendered.find("\n") + 1 :]
+                parts.append(f"<pre>{html_escape(rendered)}</pre>")
             else:
                 parts.append(
                     "<i>(no matching log lines in the last "
