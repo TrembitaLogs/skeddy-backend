@@ -183,17 +183,35 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Renders alertmanager.yml by substituting TELEGRAM_* into the template.
+  # Runs once at compose-up, writes to a named volume, then exits.
+  alertmanager-init:
+    image: alpine:3.20
+    container_name: skeddy-alertmanager-init
+    command:
+      - sh
+      - -c
+      - "apk add --no-cache gettext > /dev/null && envsubst < /tpl/alertmanager.yml > /out/alertmanager.yml"
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./alertmanager/alertmanager.yml:/tpl/alertmanager.yml:ro
+      - alertmanagerconf:/out
+    restart: "no"
+
   alertmanager:
     image: prom/alertmanager:v0.28.0
     container_name: skeddy-alertmanager
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
-    configs:
-      - source: alertmanager_config
-        target: /etc/alertmanager/alertmanager.yml
     volumes:
+      - alertmanagerconf:/etc/alertmanager:ro
       - alertmanagerdata:/alertmanager
+    depends_on:
+      alertmanager-init:
+        condition: service_completed_successfully
     restart: always
     networks:
       - logs
@@ -251,37 +269,4 @@ volumes:
   promtaildata:
   grafanadata:
   alertmanagerdata:
-
-# Inlined Alertmanager config — env vars are expanded by Compose during "up".
-# Kept here instead of a mounted file so TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID
-# stay in .env and never land in the image or the repo.
-configs:
-  alertmanager_config:
-    content: |
-      global:
-        resolve_timeout: 5m
-
-      route:
-        receiver: telegram
-        group_by: [alertname, container]
-        group_wait: 30s
-        group_interval: 5m
-        # Re-send a still-firing alert at most once per 4h to avoid spam.
-        repeat_interval: 4h
-
-      receivers:
-        - name: telegram
-          telegram_configs:
-            - bot_token: "${TELEGRAM_BOT_TOKEN}"
-              chat_id: ${TELEGRAM_CHAT_ID}
-              api_url: https://api.telegram.org
-              parse_mode: HTML
-              message: |
-                <b>[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}</b>
-                Severity: {{ .CommonLabels.severity }}
-                Container: {{ .CommonLabels.container }}
-                {{ range .Alerts -}}
-                ── {{ .Annotations.summary }}
-                {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
-                {{ end }}
-                <a href="https://logs.skeddy.net/explore">Open Grafana</a>
+  alertmanagerconf:
