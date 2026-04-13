@@ -1,0 +1,58 @@
+# Loki ruler alerts. Evaluated every minute; fired alerts are routed to Alertmanager.
+# Tenant is "fake" because Loki has auth_enabled=false (single-tenant mode).
+groups:
+  - name: skeddy-critical
+    interval: 1m
+    rules:
+
+      # Any log line tagged FATAL/CRITICAL/panic in any container — page immediately.
+      - alert: CriticalLogLine
+        expr: |
+          sum by (container) (
+            count_over_time(
+              {project="skeddy-backend"} |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b" [1m]
+            )
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical log line in {{ $labels.container }}"
+          description: "{{ $value }} critical line(s) in the last minute. Grep Grafana for context."
+
+      # Sustained error rate from the app — likely regression, not a one-off.
+      - alert: SkeddyAppHighErrorRate
+        expr: |
+          sum by (container) (
+            rate(
+              {container="skeddy-app"} |~ "(?i)\\b(error|exception|traceback)\\b" [5m]
+            )
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "skeddy-app error rate > 0.5/s for 5m"
+          description: "Current rate: {{ printf \"%.2f\" $value }} errors/s."
+
+      # Postgres spitting FATAL/ERROR — could be auth, disk, or query failures.
+      - alert: PostgresErrors
+        expr: |
+          sum(
+            count_over_time({container="skeddy-db"} |~ "^[0-9-]+ [0-9:.]+ UTC \\[[0-9]+\\] (FATAL|ERROR)" [10m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres produced >5 ERROR/FATAL lines in 10m"
+
+      # Backup script reports failure. Runs every 30m; 1h window catches two attempts.
+      - alert: BackupFailed
+        expr: |
+          sum(count_over_time({container="skeddy-backup"} |~ "(?i)(failed|error)" [1h])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup job reported a failure in the last hour"
