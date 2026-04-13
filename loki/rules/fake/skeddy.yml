@@ -9,12 +9,17 @@ groups:
     interval: 1m
     rules:
 
-      # Any log line tagged FATAL/CRITICAL/panic in any container — page immediately.
+      # Any log line tagged FATAL/CRITICAL/panic in an application container —
+      # page immediately. Infra containers (loki, grafana, promtail, alertmanager,
+      # alert-bridge) are excluded because their own request/query logs echo the
+      # pattern back when someone opens the alert in Grafana, which would create
+      # a self-feedback loop.
       - alert: CriticalLogLine
         expr: |
           sum by (container) (
             count_over_time(
-              {project="skeddy-backend"} |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b" [1m]
+              {project="skeddy-backend", container!~"skeddy-(loki|grafana|promtail|alertmanager|alert-bridge)"}
+                |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b" [1m]
             )
           ) > 0
         for: 0m
