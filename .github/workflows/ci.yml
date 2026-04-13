@@ -39,7 +39,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -56,7 +56,7 @@ jobs:
         run: uv run ruff format --check .
 
   type-check:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -70,7 +70,7 @@ jobs:
         run: uv run mypy app/
 
   dependency-audit:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -84,7 +84,7 @@ jobs:
         run: uv run pip-audit
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     services:
       postgres:
         image: postgres:17-alpine
