@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: self-hosted
+    runs-on: [self-hosted, skeddy-prod]
     steps:
       - uses: actions/checkout@v5
 
@@ -30,7 +30,7 @@ jobs:
         run: uv run ruff format --check .
 
   type-check:
-    runs-on: self-hosted
+    runs-on: [self-hosted, skeddy-prod]
     steps:
       - uses: actions/checkout@v5
 
@@ -44,7 +44,7 @@ jobs:
         run: uv run mypy app/
 
   dependency-audit:
-    runs-on: self-hosted
+    runs-on: [self-hosted, skeddy-prod]
     steps:
       - uses: actions/checkout@v5
 
@@ -58,7 +58,7 @@ jobs:
         run: uv run pip-audit
 
   test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, skeddy-prod]
     services:
       postgres:
         image: postgres:17-alpine
