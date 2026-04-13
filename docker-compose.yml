@@ -136,6 +136,7 @@ services:
     command: -config.file=/etc/loki/loki-config.yml -config.expand-env=true
     volumes:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./loki/rules:/etc/loki/rules:ro
       - lokidata:/loki
     environment:
       LOKI_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT}
@@ -176,6 +177,59 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: skeddy-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanagerdata:/alertmanager
+    depends_on:
+      - alert-bridge
+    restart: always
+    networks:
+      - logs
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.3"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Receives Alertmanager webhooks, fetches matching log lines from Loki,
+  # and posts a single Telegram message per alert with the actual log
+  # content embedded — something AM's built-in telegram_configs cannot do
+  # because Loki ruler only forwards labels and a numeric value.
+  alert-bridge:
+    image: python:3.13-alpine
+    container_name: skeddy-alert-bridge
+    command: ["python", "/app/bridge.py"]
+    volumes:
+      - ./alert-bridge/bridge.py:/app/bridge.py:ro
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      LOKI_URL: http://loki:3100
+    restart: always
+    networks:
+      - logs
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.2"
     logging:
       driver: json-file
       options:
@@ -224,3 +278,4 @@ volumes:
   lokidata:
   promtaildata:
   grafanadata:
+  alertmanagerdata:

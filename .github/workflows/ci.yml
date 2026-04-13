@@ -3,8 +3,31 @@ name: CI
 on:
   push:
     branches: [main]
+    # Skip CI when only ops/observability files change — saves the
+    # free-tier Actions quota for app-code PRs that actually need
+    # lint/test/type-check/audit.
+    paths-ignore:
+      - "docker-compose*.yml"
+      - ".env.example"
+      - "loki/**"
+      - "promtail/**"
+      - "alertmanager/**"
+      - "grafana/**"
+      - "alert-bridge/**"
+      - "nginx/**"
+      - "**/*.md"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docker-compose*.yml"
+      - ".env.example"
+      - "loki/**"
+      - "promtail/**"
+      - "alertmanager/**"
+      - "grafana/**"
+      - "alert-bridge/**"
+      - "nginx/**"
+      - "**/*.md"
   workflow_call:
 
 concurrency:

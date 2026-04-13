@@ -1,0 +1,18 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: bridge
+  group_by: [alertname, container]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  # Plain webhook to alert-bridge, which fetches matching log lines from
+  # Loki and posts a rich message to Telegram itself.
+  - name: bridge
+    webhook_configs:
+      - url: http://alert-bridge:8080/webhook
+        send_resolved: true
+        max_alerts: 0
