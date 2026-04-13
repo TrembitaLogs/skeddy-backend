@@ -1,5 +1,9 @@
 # Loki ruler alerts. Evaluated every minute; fired alerts are routed to Alertmanager.
 # Tenant is "fake" because Loki has auth_enabled=false (single-tenant mode).
+#
+# Each alert carries a grafana_url annotation with a pre-loaded Explore query so
+# a recipient can click the link in the Telegram message and see the actual
+# matching log lines without retyping the query.
 groups:
   - name: skeddy-critical
     interval: 1m
@@ -17,8 +21,12 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Critical log line in {{ $labels.container }}"
-          description: "{{ $value }} critical line(s) in the last minute. Grep Grafana for context."
+          summary: 'Critical log line in {{ $labels.container }}'
+          description: '{{ $value }} matching line(s) in the last minute. Pattern: fatal|critical|panic|unhandled exception'
+          loki_query: '{container="{{ $labels.container }}"} |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b"'
+          grafana_url: |-
+            {{- $q := printf `{container="%s"} |~ "(?i)\\b(fatal|critical|panic|unhandled exception)\\b"` $labels.container -}}
+            https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-30m","to":"now"}}` $q | urlquery }}
 
       # Sustained error rate from the app — likely regression, not a one-off.
       - alert: SkeddyAppHighErrorRate
@@ -32,8 +40,12 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "skeddy-app error rate > 0.5/s for 5m"
-          description: "Current rate: {{ printf \"%.2f\" $value }} errors/s."
+          summary: 'skeddy-app error rate > 0.5/s for 5m'
+          description: 'Current rate: {{ printf "%.2f" $value }} errors/s'
+          loki_query: '{container="skeddy-app"} |~ "(?i)\\b(error|exception|traceback)\\b"'
+          grafana_url: |-
+            {{- $q := `{container="skeddy-app"} |~ "(?i)\\b(error|exception|traceback)\\b"` -}}
+            https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-1h","to":"now"}}` $q | urlquery }}
 
       # Postgres spitting FATAL/ERROR — could be auth, disk, or query failures.
       - alert: PostgresErrors
@@ -44,8 +56,14 @@ groups:
         for: 5m
         labels:
           severity: warning
+          container: skeddy-db
         annotations:
-          summary: "Postgres produced >5 ERROR/FATAL lines in 10m"
+          summary: 'Postgres produced >5 ERROR/FATAL lines in 10m'
+          description: '{{ $value }} ERROR/FATAL lines detected'
+          loki_query: '{container="skeddy-db"} |~ "^[0-9-]+ [0-9:.]+ UTC \\[[0-9]+\\] (FATAL|ERROR)"'
+          grafana_url: |-
+            {{- $q := `{container="skeddy-db"} |~ "^[0-9-]+ [0-9:.]+ UTC \\[[0-9]+\\] (FATAL|ERROR)"` -}}
+            https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-1h","to":"now"}}` $q | urlquery }}
 
       # Backup script reports failure. Runs every 30m; 1h window catches two attempts.
       - alert: BackupFailed
@@ -54,5 +72,11 @@ groups:
         for: 1m
         labels:
           severity: warning
+          container: skeddy-backup
         annotations:
-          summary: "Backup job reported a failure in the last hour"
+          summary: 'Backup job reported a failure in the last hour'
+          description: '{{ $value }} failure line(s) in backup output'
+          loki_query: '{container="skeddy-backup"} |~ "(?i)(failed|error)"'
+          grafana_url: |-
+            {{- $q := `{container="skeddy-backup"} |~ "(?i)(failed|error)"` -}}
+            https://logs.skeddy.net/explore?left={{ printf `{"datasource":"Loki","queries":[{"expr":%q}],"range":{"from":"now-2h","to":"now"}}` $q | urlquery }}

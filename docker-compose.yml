@@ -183,23 +183,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Renders alertmanager.yml by substituting TELEGRAM_* into the template.
-  # Runs once at compose-up, writes to a named volume, then exits.
-  alertmanager-init:
-    image: alpine:3.20
-    container_name: skeddy-alertmanager-init
-    command:
-      - sh
-      - -c
-      - "apk add --no-cache gettext > /dev/null && envsubst < /tpl/alertmanager.yml > /out/alertmanager.yml"
-    environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-    volumes:
-      - ./alertmanager/alertmanager.yml:/tpl/alertmanager.yml:ro
-      - alertmanagerconf:/out
-    restart: "no"
-
   alertmanager:
     image: prom/alertmanager:v0.28.0
     container_name: skeddy-alertmanager
@@ -207,11 +190,10 @@ services:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
     volumes:
-      - alertmanagerconf:/etc/alertmanager:ro
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanagerdata:/alertmanager
     depends_on:
-      alertmanager-init:
-        condition: service_completed_successfully
+      - alert-bridge
     restart: always
     networks:
       - logs
@@ -220,6 +202,34 @@ services:
         limits:
           memory: 128M
           cpus: "0.3"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Receives Alertmanager webhooks, fetches matching log lines from Loki,
+  # and posts a single Telegram message per alert with the actual log
+  # content embedded — something AM's built-in telegram_configs cannot do
+  # because Loki ruler only forwards labels and a numeric value.
+  alert-bridge:
+    image: python:3.13-alpine
+    container_name: skeddy-alert-bridge
+    command: ["python", "/app/bridge.py"]
+    volumes:
+      - ./alert-bridge/bridge.py:/app/bridge.py:ro
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      LOKI_URL: http://loki:3100
+    restart: always
+    networks:
+      - logs
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.2"
     logging:
       driver: json-file
       options:
@@ -269,4 +279,3 @@ volumes:
   promtaildata:
   grafanadata:
   alertmanagerdata:
-  alertmanagerconf:
