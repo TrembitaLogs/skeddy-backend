@@ -130,11 +130,97 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: skeddy-loki
+    command: -config.file=/etc/loki/loki-config.yml -config.expand-env=true
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - lokidata:/loki
+    environment:
+      LOKI_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT}
+      LOKI_S3_REGION: ${LOKI_S3_REGION:-sfo3}
+      LOKI_S3_BUCKET: ${LOKI_S3_BUCKET:-skeddy-logs}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    restart: always
+    networks:
+      - logs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: skeddy-promtail
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtaildata:/tmp
+    depends_on:
+      - loki
+    restart: always
+    networks:
+      - logs
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: skeddy-grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://logs.skeddy.net
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+    restart: always
+    networks:
+      - logs
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   backend:
+    driver: bridge
+  logs:
     driver: bridge
 
 volumes:
   pgdata:
   redisdata:
   backupdata:
+  lokidata:
+  promtaildata:
+  grafanadata:

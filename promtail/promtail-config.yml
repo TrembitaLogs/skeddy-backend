@@ -1,0 +1,41 @@
+# Promtail scrapes Docker container logs via the Docker SD API
+# and pushes them to Loki. Positions file persists read offsets.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Container name without leading slash
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+      # stdout or stderr
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: stream
+      # docker-compose service name
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+      # docker-compose project name
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
+        target_label: project
+    pipeline_stages:
+      - docker: {}
+      # If the log line is JSON (e.g., structured logs from the app),
+      # extract level and promote it to a Loki label for quick filtering.
+      - json:
+          expressions:
+            level: level
+      - labels:
+          level:
