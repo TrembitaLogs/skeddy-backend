@@ -7,14 +7,34 @@ on:
       - '**/*.md'
       - 'LICENSE'
       - '.gitignore'
+      - '.dockerignore'
       - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - '.idea/**'
+      - 'loki/**'
+      - 'grafana/**'
+      - 'alertmanager/**'
+      - 'alert-bridge/**'
+      - 'promtail/**'
+      - 'nginx/**'
+      - 'docker-compose*.yml'
   pull_request:
     branches: [main]
     paths-ignore:
       - '**/*.md'
       - 'LICENSE'
       - '.gitignore'
+      - '.dockerignore'
       - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - '.idea/**'
+      - 'loki/**'
+      - 'grafana/**'
+      - 'alertmanager/**'
+      - 'alert-bridge/**'
+      - 'promtail/**'
+      - 'nginx/**'
+      - 'docker-compose*.yml'
   workflow_call:
 
 concurrency:
