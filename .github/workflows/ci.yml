@@ -3,8 +3,38 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.dockerignore'
+      - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - '.idea/**'
+      - 'loki/**'
+      - 'grafana/**'
+      - 'alertmanager/**'
+      - 'alert-bridge/**'
+      - 'promtail/**'
+      - 'nginx/**'
+      - 'docker-compose*.yml'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.dockerignore'
+      - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - '.idea/**'
+      - 'loki/**'
+      - 'grafana/**'
+      - 'alertmanager/**'
+      - 'alert-bridge/**'
+      - 'promtail/**'
+      - 'nginx/**'
+      - 'docker-compose*.yml'
   workflow_call:
 
 concurrency:
@@ -13,7 +43,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: [self-hosted, skeddy-prod]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -30,7 +60,7 @@ jobs:
         run: uv run ruff format --check .
 
   type-check:
-    runs-on: [self-hosted, skeddy-prod]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -44,7 +74,7 @@ jobs:
         run: uv run mypy app/
 
   dependency-audit:
-    runs-on: [self-hosted, skeddy-prod]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -58,7 +88,7 @@ jobs:
         run: uv run pip-audit
 
   test:
-    runs-on: [self-hosted, skeddy-prod]
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:17-alpine
