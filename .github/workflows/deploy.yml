@@ -18,7 +18,7 @@ jobs:
 
   build-and-push:
     needs: checks
-    runs-on: [self-hosted, skeddy-prod]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -58,7 +58,7 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-on: [self-hosted, skeddy-prod]
+    runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v5
