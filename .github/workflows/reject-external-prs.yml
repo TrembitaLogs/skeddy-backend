@@ -1,0 +1,39 @@
+name: Reject External PRs
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  reject:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = [
+              `Hi @${pr.user.login}, thanks for your interest in this project.`,
+              ``,
+              `This repository is published for **transparency and reference only** — external contributions are not accepted. Please see [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) and the [LICENSE](../blob/main/LICENSE) for details.`,
+              ``,
+              `Closing this PR automatically. You are welcome to fork and study the code within the bounds of the LICENSE.`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body,
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              state: 'closed',
+            });
