@@ -48,6 +48,20 @@ class TestRegisterRequest:
             RegisterRequest(email="not-an-email", password="securePassword123")
         assert "email" in str(exc_info.value)
 
+    def test_password_longer_than_72_bytes_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(email="user@example.com", password="A" + "a" * 72)
+        assert "PASSWORD_TOO_LONG" in str(exc_info.value)
+
+    def test_password_72_bytes_allowed(self):
+        schema = RegisterRequest(email="user@example.com", password="A" + "a" * 71)
+        assert len(schema.password.encode()) == 72
+
+    def test_multibyte_password_exceeding_72_bytes_raises_validation_error(self):
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(email="user@example.com", password="Пароль" * 7)
+        assert "PASSWORD_TOO_LONG" in str(exc_info.value)
+
     def test_empty_email_raises_validation_error(self):
         with pytest.raises(ValidationError):
             RegisterRequest(email="", password="securePassword123")

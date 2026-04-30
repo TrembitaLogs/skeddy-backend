@@ -46,6 +46,33 @@ def test_hash_password_uses_salt():
     assert hash1 != hash2
 
 
+def test_hash_password_accepts_input_longer_than_72_bytes():
+    """Bcrypt 5.x raises ValueError for >72-byte inputs; we must truncate first."""
+    long_password = "A" * 100
+    hashed = hash_password(long_password)
+    assert hashed.startswith("$2b$")
+
+
+def test_verify_password_accepts_input_longer_than_72_bytes():
+    """Verifying a long password must not raise — it should match the truncated hash."""
+    long_password = "A" * 100
+    hashed = hash_password(long_password)
+    assert verify_password(long_password, hashed) is True
+
+
+def test_verify_password_treats_inputs_equal_in_first_72_bytes_as_match():
+    """Documents bcrypt's 72-byte cap: differing suffixes past byte 72 do not matter."""
+    hashed = hash_password("A" * 72 + "X")
+    assert verify_password("A" * 72 + "Y", hashed) is True
+
+
+def test_verify_password_handles_multibyte_utf8_longer_than_72_bytes():
+    """Cyrillic chars are 2 bytes each in UTF-8, so 40 chars = 80 bytes."""
+    long_password = "Пароль" * 10  # 60 chars, 120 bytes
+    hashed = hash_password(long_password)
+    assert verify_password(long_password, hashed) is True
+
+
 # --- JWT token tests ---
 
 
