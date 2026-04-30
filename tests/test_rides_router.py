@@ -921,8 +921,9 @@ async def test_get_ride_events_ordered_newest_first(app_client, db_session):
     reg = await _register(app_client, email="order@example.com")
     user_id = UUID(reg["user_id"])
 
-    # Insert rides directly with explicit timestamps to guarantee ordering
-    base_time = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
+    # Insert rides directly with explicit timestamps to guarantee ordering.
+    # Use relative dates to avoid 8-week data_cleanup retention drift.
+    base_time = datetime.now(UTC) - timedelta(days=14)
     for i in range(3):
         ride = Ride(
             user_id=user_id,
@@ -1042,7 +1043,8 @@ async def test_get_ride_events_since_plus_cursor(app_client, db_session):
     await _verify_email_in_db(db_session, reg["user_id"])
     user_id = UUID(reg["user_id"])
 
-    base_time = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
+    # Use relative dates to avoid 8-week data_cleanup retention drift.
+    base_time = datetime.now(UTC) - timedelta(days=14)
     for i in range(4):
         ride = Ride(
             user_id=user_id,
