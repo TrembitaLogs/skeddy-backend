@@ -55,7 +55,9 @@ jobs:
       - run: uv sync --frozen
 
       - name: Audit dependencies for vulnerabilities
-        run: uv run pip-audit
+        # CVE-2026-3219: pip is pulled in transitively by pip-audit -> pip-api;
+        # no fix released upstream. Re-evaluate after each pip-audit bump.
+        run: uv run pip-audit --ignore-vuln CVE-2026-3219
 
   test:
     runs-on: ubuntu-latest
