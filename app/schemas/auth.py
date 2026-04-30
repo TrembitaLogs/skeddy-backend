@@ -13,7 +13,19 @@ def _validate_password_uppercase(v: str) -> str:
     return v
 
 
-PasswordStr = Annotated[str, Field(min_length=8), AfterValidator(_validate_password_uppercase)]
+def _validate_password_byte_length(v: str) -> str:
+    """Reject passwords whose UTF-8 representation exceeds bcrypt's 72-byte input cap."""
+    if len(v.encode()) > 72:
+        raise ValueError("PASSWORD_TOO_LONG")
+    return v
+
+
+PasswordStr = Annotated[
+    str,
+    Field(min_length=8),
+    AfterValidator(_validate_password_uppercase),
+    AfterValidator(_validate_password_byte_length),
+]
 
 
 class RegisterRequest(BaseModel):

@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 _ROUNDS = 12
 
+# Bcrypt only uses the first 72 bytes of the input; longer inputs raise
+# ValueError in bcrypt >=5.x. Truncate before hashing/verifying so callers
+# never see that exception (matches bcrypt 4.x silent-truncation behavior
+# under which any pre-existing hashes were created).
+_BCRYPT_MAX_BYTES = 72
+
 # --- Account lockout Redis key schema ---
 # login_attempts:{email} → string counter
 _LOGIN_ATTEMPTS_PREFIX = "login_attempts:"
@@ -95,11 +101,11 @@ _VERIFY_CODE_PREFIX = "verify_code:"
 
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt(rounds=_ROUNDS)
-    return bcrypt.hashpw(password.encode(), salt).decode()
+    return bcrypt.hashpw(password.encode()[:_BCRYPT_MAX_BYTES], salt).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    return bcrypt.checkpw(plain_password.encode()[:_BCRYPT_MAX_BYTES], hashed_password.encode())
 
 
 def create_access_token(user_id: UUID) -> str:
