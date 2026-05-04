@@ -182,3 +182,147 @@ class TestWelcomeFallbackTemplate:
         assert es["subject"]
         assert "{search_app_url}" in es["body"]
         assert "{bonus_amount}" in es["body"]
+
+
+class TestSendWelcomeEmail:
+    """Unit tests for send_welcome_email."""
+
+    async def test_renders_placeholders_en(self):
+        """Welcome email body contains the search app URL and bonus amount."""
+        from app.services.email_service import send_welcome_email
+
+        with (
+            patch(
+                "app.services.email_service.aiosmtplib.send", new_callable=AsyncMock
+            ) as mock_send,
+            patch("app.services.email_service.settings") as mock_settings,
+        ):
+            mock_settings.EMAIL_FROM = "noreply@skeddy.app"
+            mock_settings.EMAIL_HOST = "smtp.test"
+            mock_settings.EMAIL_PORT = 587
+            mock_settings.EMAIL_USER = "u"
+            mock_settings.EMAIL_PASSWORD = "p"
+            mock_settings.SEARCH_APP_UPDATE_URL = "https://example.com/search.apk"
+
+            await send_welcome_email("driver@example.com", language="en")
+
+            mock_send.assert_called_once()
+            msg: EmailMessage = mock_send.call_args.args[0]
+            assert msg["To"] == "driver@example.com"
+            body = msg.get_content()
+            assert "https://example.com/search.apk" in body
+            # When db/redis are None, function uses DEFAULT_REGISTRATION_BONUS_CREDITS (10)
+            assert "10" in body
+            assert msg["Subject"] == "Welcome to Skeddy"
+
+    async def test_uses_spanish_template_when_language_es(self):
+        from app.services.email_service import send_welcome_email
+
+        with (
+            patch(
+                "app.services.email_service.aiosmtplib.send", new_callable=AsyncMock
+            ) as mock_send,
+            patch("app.services.email_service.settings") as mock_settings,
+        ):
+            mock_settings.EMAIL_FROM = "noreply@skeddy.app"
+            mock_settings.EMAIL_HOST = "smtp.test"
+            mock_settings.EMAIL_PORT = 587
+            mock_settings.EMAIL_USER = "u"
+            mock_settings.EMAIL_PASSWORD = "p"
+            mock_settings.SEARCH_APP_UPDATE_URL = "https://example.com/search.apk"
+
+            await send_welcome_email("driver@example.com", language="es")
+
+            msg: EmailMessage = mock_send.call_args.args[0]
+            assert msg["Subject"] == "Bienvenido a Skeddy"
+            body = msg.get_content()
+            assert "Bienvenido" in body
+
+    async def test_unknown_language_falls_back_to_english(self):
+        from app.services.email_service import send_welcome_email
+
+        with (
+            patch(
+                "app.services.email_service.aiosmtplib.send", new_callable=AsyncMock
+            ) as mock_send,
+            patch("app.services.email_service.settings") as mock_settings,
+        ):
+            mock_settings.EMAIL_FROM = "noreply@skeddy.app"
+            mock_settings.EMAIL_HOST = "smtp.test"
+            mock_settings.EMAIL_PORT = 587
+            mock_settings.EMAIL_USER = "u"
+            mock_settings.EMAIL_PASSWORD = "p"
+            mock_settings.SEARCH_APP_UPDATE_URL = "https://example.com/search.apk"
+
+            await send_welcome_email("driver@example.com", language="fr")
+
+            msg: EmailMessage = mock_send.call_args.args[0]
+            assert msg["Subject"] == "Welcome to Skeddy"
+
+    async def test_uses_bonus_from_config_when_db_redis_provided(self):
+        """When both db and redis are provided, bonus comes from get_registration_bonus_credits."""
+        from app.services.email_service import send_welcome_email
+
+        with (
+            patch(
+                "app.services.email_service.aiosmtplib.send", new_callable=AsyncMock
+            ) as mock_send,
+            patch("app.services.email_service.settings") as mock_settings,
+            patch(
+                "app.services.email_service.get_registration_bonus_credits",
+                new_callable=AsyncMock,
+                return_value=42,
+            ),
+            patch(
+                "app.services.email_service._get_templates",
+                new_callable=AsyncMock,
+            ) as mock_get_templates,
+        ):
+            mock_settings.EMAIL_FROM = "noreply@skeddy.app"
+            mock_settings.EMAIL_HOST = "smtp.test"
+            mock_settings.EMAIL_PORT = 587
+            mock_settings.EMAIL_USER = "u"
+            mock_settings.EMAIL_PASSWORD = "p"
+            mock_settings.SEARCH_APP_UPDATE_URL = "https://example.com/search.apk"
+            mock_get_templates.return_value = {
+                "WELCOME": {
+                    "en": {
+                        "subject": "Welcome",
+                        "body": "Bonus: {bonus_amount}, URL: {search_app_url}",
+                    },
+                },
+            }
+
+            db_mock = object()
+            redis_mock = object()
+            await send_welcome_email(
+                "driver@example.com", language="en", db=db_mock, redis=redis_mock
+            )
+
+            msg: EmailMessage = mock_send.call_args.args[0]
+            body = msg.get_content()
+            assert "Bonus: 42" in body
+            assert "URL: https://example.com/search.apk" in body
+
+    async def test_falls_back_to_default_bonus_when_db_or_redis_none(self):
+        """If db or redis is None, function uses DEFAULT_REGISTRATION_BONUS_CREDITS (10)."""
+        from app.services.email_service import send_welcome_email
+
+        with (
+            patch(
+                "app.services.email_service.aiosmtplib.send", new_callable=AsyncMock
+            ) as mock_send,
+            patch("app.services.email_service.settings") as mock_settings,
+        ):
+            mock_settings.EMAIL_FROM = "noreply@skeddy.app"
+            mock_settings.EMAIL_HOST = "smtp.test"
+            mock_settings.EMAIL_PORT = 587
+            mock_settings.EMAIL_USER = "u"
+            mock_settings.EMAIL_PASSWORD = "p"
+            mock_settings.SEARCH_APP_UPDATE_URL = "https://example.com/search.apk"
+
+            await send_welcome_email("driver@example.com", db=None, redis=None)
+
+            msg: EmailMessage = mock_send.call_args.args[0]
+            body = msg.get_content()
+            assert "10" in body  # DEFAULT_REGISTRATION_BONUS_CREDITS
