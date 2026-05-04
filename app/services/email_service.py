@@ -200,6 +200,7 @@ async def send_welcome_email(
     if db is not None and redis is not None:
         try:
             bonus_amount = await get_registration_bonus_credits(db, redis)
+        # Broad catch: any failure in bonus lookup must not block the welcome email.
         except Exception:
             logger.warning(
                 "Failed to read registration bonus for welcome email, using default",
