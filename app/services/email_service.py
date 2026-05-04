@@ -7,6 +7,10 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.config_service import (
+    DEFAULT_REGISTRATION_BONUS_CREDITS,
+    get_registration_bonus_credits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,28 @@ _FALLBACK_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
                 "This code expires in 15 minutes.\n\n"
                 "If you didn't request a password reset, you can safely ignore this email.\n\n"
                 "\u2014 Skeddy Team"
+            ),
+        },
+    },
+    "WELCOME": {
+        "en": {
+            "subject": "Welcome to Skeddy",
+            "body": (
+                "Welcome to Skeddy!\n\n"
+                "Your account is verified and {bonus_amount} bonus credits have been added to your balance.\n\n"
+                "Download the Skeddy Search app for Android here:\n"
+                "{search_app_url}\n\n"
+                "\u2014 Skeddy Team"
+            ),
+        },
+        "es": {
+            "subject": "Bienvenido a Skeddy",
+            "body": (
+                "\u00a1Bienvenido a Skeddy!\n\n"
+                "Tu cuenta est\u00e1 verificada y se han a\u00f1adido {bonus_amount} cr\u00e9ditos de bonificaci\u00f3n a tu saldo.\n\n"
+                "Descarga la aplicaci\u00f3n Skeddy Search para Android aqu\u00ed:\n"
+                "{search_app_url}\n\n"
+                "\u2014 Equipo de Skeddy"
             ),
         },
     },
@@ -157,3 +183,37 @@ async def send_verification_code(
     await _send_code_email(
         to_email, code, "VERIFICATION", "Verification code", language, db, redis
     )
+
+
+async def send_welcome_email(
+    to_email: str,
+    language: str = "en",
+    db: AsyncSession | None = None,
+    redis: Redis | None = None,
+) -> None:
+    """Send a welcome email after first email verification.
+
+    Renders the WELCOME template with the search app download URL and the
+    registration bonus amount. Bonus is read from app config when both db and
+    redis are provided; otherwise falls back to DEFAULT_REGISTRATION_BONUS_CREDITS.
+    """
+    if db is not None and redis is not None:
+        try:
+            bonus_amount = await get_registration_bonus_credits(db, redis)
+        # Broad catch: any failure in bonus lookup must not block the welcome email.
+        except Exception:
+            logger.warning(
+                "Failed to read registration bonus for welcome email, using default",
+                exc_info=True,
+            )
+            bonus_amount = DEFAULT_REGISTRATION_BONUS_CREDITS
+    else:
+        bonus_amount = DEFAULT_REGISTRATION_BONUS_CREDITS
+
+    templates = await _get_templates(db, redis)
+    t = _resolve_template(templates, "WELCOME", language)
+    body = t["body"].format(
+        search_app_url=settings.SEARCH_APP_UPDATE_URL,
+        bonus_amount=bonus_amount,
+    )
+    await _send_email(to_email, t["subject"], body, "Welcome email")

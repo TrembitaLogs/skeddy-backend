@@ -47,6 +47,7 @@ scripts/update-local.sh
 .taskmaster/
 .mcp.json
 CLAUDE.md
+docs/
 
 # Firebase credentials
 firebase-credentials.json

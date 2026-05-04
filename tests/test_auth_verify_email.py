@@ -275,3 +275,77 @@ async def test_verify_email_code_consumed_after_success(app_client, fake_redis):
     # Code should be gone from Redis
     stored = await fake_redis.get(f"verify_code:{data['user_id']}")
     assert stored is None
+
+
+# --- Welcome email trigger (Task 4) ---
+
+
+async def test_verify_email_first_time_sends_welcome_email(app_client, fake_redis):
+    """First successful verify-email triggers send_welcome_email exactly once."""
+    data, headers = await _register_and_get_auth(app_client, email="welcome-driver@example.com")
+    await _store_verify_code_in_redis(fake_redis, data["user_id"])
+
+    with patch("app.routers.auth.send_welcome_email", new_callable=AsyncMock) as mock_welcome:
+        response = await app_client.post(
+            VERIFY_EMAIL_URL,
+            json={"code": _VERIFY_CODE},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert mock_welcome.await_count == 1
+    args, kwargs = mock_welcome.await_args
+    # Function is called positionally: (to_email, ...) or by-name — tolerate both.
+    to_email = kwargs.get("to_email") or (args[0] if args else None)
+    assert to_email == "welcome-driver@example.com"
+
+
+async def test_verify_email_smtp_failure_does_not_break_endpoint(app_client, fake_redis):
+    """If send_welcome_email raises, the endpoint still returns 200."""
+    data, headers = await _register_and_get_auth(app_client, email="welcome-fail@example.com")
+    await _store_verify_code_in_redis(fake_redis, data["user_id"])
+
+    with patch(
+        "app.routers.auth.send_welcome_email",
+        new=AsyncMock(side_effect=Exception("SMTP down")),
+    ):
+        response = await app_client.post(
+            VERIFY_EMAIL_URL,
+            json={"code": _VERIFY_CODE},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+async def test_verify_email_already_verified_does_not_send_welcome(app_client, fake_redis):
+    """When user is already verified, welcome email must NOT be sent."""
+    data, headers = await _register_and_get_auth(app_client, email="already-verified@example.com")
+    await _store_verify_code_in_redis(fake_redis, data["user_id"])
+
+    # First verification — welcome MUST be sent.
+    with patch(
+        "app.routers.auth.send_welcome_email", new_callable=AsyncMock
+    ) as mock_first_welcome:
+        first = await app_client.post(
+            VERIFY_EMAIL_URL,
+            json={"code": _VERIFY_CODE},
+            headers=headers,
+        )
+        assert first.status_code == 200
+        assert mock_first_welcome.await_count == 1
+
+    # Second verification attempt — welcome must NOT be sent again.
+    # The endpoint will return 400 ALREADY_VERIFIED (existing behavior),
+    # but the welcome email mock must remain uncalled regardless.
+    await _store_verify_code_in_redis(fake_redis, data["user_id"])
+    with patch("app.routers.auth.send_welcome_email", new_callable=AsyncMock) as mock_welcome:
+        second = await app_client.post(
+            VERIFY_EMAIL_URL,
+            json={"code": _VERIFY_CODE},
+            headers=headers,
+        )
+        assert mock_welcome.await_count == 0
+        assert second.status_code == 400
+        assert second.json()["error"]["code"] == "ALREADY_VERIFIED"
