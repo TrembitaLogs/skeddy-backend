@@ -324,14 +324,17 @@ async def test_verify_email_already_verified_does_not_send_welcome(app_client, f
     data, headers = await _register_and_get_auth(app_client, email="already-verified@example.com")
     await _store_verify_code_in_redis(fake_redis, data["user_id"])
 
-    # First verification (welcome IS sent — we don't assert here, just consume)
-    with patch("app.routers.auth.send_welcome_email", new_callable=AsyncMock):
+    # First verification — welcome MUST be sent.
+    with patch(
+        "app.routers.auth.send_welcome_email", new_callable=AsyncMock
+    ) as mock_first_welcome:
         first = await app_client.post(
             VERIFY_EMAIL_URL,
             json={"code": _VERIFY_CODE},
             headers=headers,
         )
         assert first.status_code == 200
+        assert mock_first_welcome.await_count == 1
 
     # Second verification attempt — welcome must NOT be sent again.
     # The endpoint will return 400 ALREADY_VERIFIED (existing behavior),
@@ -344,6 +347,5 @@ async def test_verify_email_already_verified_does_not_send_welcome(app_client, f
             headers=headers,
         )
         assert mock_welcome.await_count == 0
-        # Status code is whatever the existing behavior is for re-verification.
-        # We only care that no welcome went out.
-        assert second.status_code in (200, 400)
+        assert second.status_code == 400
+        assert second.json()["error"]["code"] == "ALREADY_VERIFIED"
