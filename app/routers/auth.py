@@ -67,6 +67,7 @@ from app.services.email_service import (
     send_email_change_code,
     send_password_reset_code,
     send_verification_code,
+    send_welcome_email,
 )
 from app.services.pairing_service import search_login
 from app.utils.codes import generate_six_digit_code
@@ -283,6 +284,7 @@ async def verify_email(
 
         # Grant registration bonus now that email is verified (S-04 fix)
         new_balance: int | None = None
+        should_send_welcome = False
         existing_bonus = await db.execute(
             select(CreditTransaction.id)
             .where(
@@ -301,6 +303,7 @@ async def verify_email(
                 redis=redis,
                 commit=False,
             )
+            should_send_welcome = True
 
         await db.commit()
         logger.info("Email verified for user %s", current_user.id)
@@ -308,6 +311,23 @@ async def verify_email(
         # Update Redis cache after successful commit
         if new_balance is not None:
             await cache_balance(current_user.id, new_balance, redis)
+
+        # Send welcome email after the bonus is committed and cached.
+        # Failure must not break the verify-email request.
+        if should_send_welcome:
+            try:
+                await send_welcome_email(
+                    current_user.email,
+                    language=current_user.language,
+                    db=db,
+                    redis=redis,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to send welcome email to user %s",
+                    current_user.id,
+                    exc_info=True,
+                )
 
     # Delete used code from Redis
     await delete_verify_code(redis, str(current_user.id))
