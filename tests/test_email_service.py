@@ -161,3 +161,24 @@ class TestSendPasswordResetCodeSmtpErrors:
             info_records = [r for r in caplog.records if r.levelno == logging.INFO]
             assert len(info_records) == 1
             assert "ok@test.com" in info_records[0].message
+
+
+class TestWelcomeFallbackTemplate:
+    """Verify _FALLBACK_TEMPLATES includes WELCOME with required placeholders."""
+
+    def test_welcome_fallback_en_present(self):
+        from app.services.email_service import _FALLBACK_TEMPLATES
+
+        assert "WELCOME" in _FALLBACK_TEMPLATES
+        en = _FALLBACK_TEMPLATES["WELCOME"]["en"]
+        assert en["subject"]
+        assert "{search_app_url}" in en["body"]
+        assert "{bonus_amount}" in en["body"]
+
+    def test_welcome_fallback_es_present(self):
+        from app.services.email_service import _FALLBACK_TEMPLATES
+
+        es = _FALLBACK_TEMPLATES["WELCOME"]["es"]
+        assert es["subject"]
+        assert "{search_app_url}" in es["body"]
+        assert "{bonus_amount}" in es["body"]

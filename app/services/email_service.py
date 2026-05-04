@@ -52,6 +52,28 @@ _FALLBACK_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
             ),
         },
     },
+    "WELCOME": {
+        "en": {
+            "subject": "Welcome to Skeddy",
+            "body": (
+                "Welcome to Skeddy!\n\n"
+                "Your account is verified and {bonus_amount} bonus credits have been added to your balance.\n\n"
+                "Download the Skeddy Search app for Android here:\n"
+                "{search_app_url}\n\n"
+                "\u2014 Skeddy Team"
+            ),
+        },
+        "es": {
+            "subject": "Bienvenido a Skeddy",
+            "body": (
+                "\u00a1Bienvenido a Skeddy!\n\n"
+                "Tu cuenta est\u00e1 verificada y se han a\u00f1adido {bonus_amount} cr\u00e9ditos de bonificaci\u00f3n a tu saldo.\n\n"
+                "Descarga la aplicaci\u00f3n Skeddy Search para Android aqu\u00ed:\n"
+                "{search_app_url}\n\n"
+                "\u2014 Equipo de Skeddy"
+            ),
+        },
+    },
 }
 
 
